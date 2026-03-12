@@ -1,0 +1,613 @@
+#!/usr/bin/perl
+# ============================================================
+# Saros - Solar Eclipse Calculator (Tk GUI)
+# Refactored from original by Sebastian Harl (2003-2004)
+# ============================================================
+
+use strict;
+use warnings;
+use utf8;
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+
+use Tk;
+use Tk::ROText;
+
+use Saros::Engine;
+use Saros::Projection;
+use Saros::Calendar qw(chopdigits);
+
+# ── Configuration ─────────────────────────────────────────
+
+my $VERSION = "2.0";
+my $WORLDMAP = $ENV{SAROS_WORLDMAP}
+    // "$RealBin/world.jpg";
+my $AZMAP = $ENV{SAROS_AZMAP} // '';
+
+my $HAS_JPEG = eval { require Tk::JPEG; 1 } // 0;
+my $HAS_GD   = eval { require GD; 1 }       // 0;
+
+# ── State ─────────────────────────────────────────────────
+
+my $engine = Saros::Engine->new(use_delta_t => 1, earth_model => 'wgs84');
+my $projection_type = 'mercator';
+my ($from_year, $to_year);
+my @eclipse_candidates;
+my @last_central_line;
+my $last_eclipse_label;
+my $map_photo;              # keep Tk Photo alive for canvas
+my $status_msg = "Enter a year range and click Calculate.";
+my $dt_var = 1;
+my $earth_model = 'wgs84';
+
+# Map extent overrides (empty = use defaults)
+my %extent = (
+    merc_west  => '', merc_east  => '',
+    merc_north => '', merc_south => '',
+    az_center_lat => '', az_center_lon => '',
+    az_radius     => '',
+    img_x => '', img_y => '', img_w => '', img_h => '',
+);
+
+# ── Main Window ───────────────────────────────────────────
+
+my $mw = MainWindow->new(-title => "Saros $VERSION - Solar Eclipse Calculator");
+$mw->geometry('860x680+80+60');
+$mw->protocol('WM_DELETE_WINDOW', sub { $mw->destroy; exit 0 });
+
+# ── Menu ──────────────────────────────────────────────────
+
+my $mb = $mw->Menu;
+$mw->configure(-menu => $mb);
+
+my $file_menu = $mb->cascade(-label => 'File', -tearoff => 0);
+if ($HAS_GD) {
+    my $img_menu = $file_menu->cascade(-label => 'Save Map Image', -tearoff => 0);
+    $img_menu->command(-label => 'As JPEG...', -command => sub { save_image('jpg') });
+    $img_menu->command(-label => 'As PNG...',  -command => sub { save_image('png') });
+}
+$file_menu->command(-label => 'Save Report as Text...', -command => \&save_text);
+$file_menu->separator;
+$file_menu->command(-label => 'Quit', -command => sub { $mw->destroy; exit 0 },
+    -accelerator => 'Ctrl+Q');
+
+my $settings_menu = $mb->cascade(-label => 'Settings', -tearoff => 0);
+my $proj_menu = $settings_menu->cascade(-label => 'Projection', -tearoff => 0);
+$proj_menu->radiobutton(-label => 'Mercator',
+    -variable => \$projection_type, -value => 'mercator',
+    -command => \&redraw_map);
+$proj_menu->radiobutton(-label => 'Azimuthal Equidistant',
+    -variable => \$projection_type, -value => 'azimuthal_equidistant',
+    -command => \&redraw_map);
+$settings_menu->command(-label => 'Map Extent...', -command => \&edit_extent);
+
+my $help_menu = $mb->cascade(-label => 'Help', -tearoff => 0);
+$help_menu->command(-label => 'About Saros', -command => \&show_about);
+
+# ── Keybindings ───────────────────────────────────────────
+
+$mw->bind('<Control-Key-q>' => sub { $mw->destroy; exit 0 });
+$mw->bind('<Return>' => \&do_calculate);
+
+# ── Layout ────────────────────────────────────────────────
+# Structure:
+#   Row 0: input bar (year range, calculate, options)
+#   Row 1: [eclipse list | map canvas] (main area, expands)
+#   Row 2: text output (collapsible detail)
+#   Row 3: status bar
+
+# -- Row 0: Input bar
+my $input_f = $mw->Frame(-borderwidth => 1, -relief => 'groove');
+$input_f->grid('-', -sticky => 'ew', -padx => 0, -pady => 0);
+
+$input_f->Label(-text => 'From:')->pack(-side => 'left', -padx => [10, 4], -pady => 8);
+$input_f->Entry(-textvariable => \$from_year, -width => 6)
+    ->pack(-side => 'left', -pady => 8);
+$input_f->Label(-text => 'To:')->pack(-side => 'left', -padx => [10, 4], -pady => 8);
+$input_f->Entry(-textvariable => \$to_year, -width => 6)
+    ->pack(-side => 'left', -pady => 8);
+$input_f->Button(-text => 'Calculate', -command => \&do_calculate)
+    ->pack(-side => 'left', -padx => 12, -pady => 8);
+
+$input_f->Frame(-width => 1, -background => '#999999', -relief => 'flat')
+    ->pack(-side => 'left', -fill => 'y', -padx => 6, -pady => 6);
+
+$input_f->Checkbutton(-text => "Apply \x{0394}T", -variable => \$dt_var,
+    -command => \&_rebuild_engine)
+    ->pack(-side => 'left', -padx => 6, -pady => 8);
+
+$input_f->Optionmenu(
+    -variable => \$earth_model,
+    -options  => [['WGS84' => 'wgs84'], ['Sphere' => 'sphere']],
+    -command  => sub { _rebuild_engine() },
+)->pack(-side => 'left', -padx => 6, -pady => 8);
+
+# -- Row 1: Main area (eclipse list + map)
+my $main_f = $mw->Frame;
+$main_f->grid('-', -sticky => 'nsew', -padx => 0, -pady => 0);
+
+# Eclipse list (left side of main area)
+my $list_f = $main_f->Frame(-borderwidth => 1, -relief => 'groove');
+$list_f->pack(-side => 'left', -fill => 'y', -padx => 0, -pady => 0);
+
+$list_f->Label(-text => 'Eclipses', -font => ['sans', 9, 'bold'])
+    ->pack(-pady => [6, 2]);
+
+my $nm_ls = $list_f->Scrolled('Listbox',
+    -scrollbars => 'oe', -relief => 'flat',
+    -selectmode => 'single', -width => 16, -height => 10,
+    -font => ['monospace', 9],
+)->pack(-expand => 1, -fill => 'both', -padx => 4, -pady => [0, 4]);
+
+# Map canvas (right side of main area, scrollable for large images)
+my $map_f = $main_f->Frame(-borderwidth => 1, -relief => 'sunken');
+$map_f->pack(-side => 'left', -expand => 1, -fill => 'both', -padx => 0, -pady => 0);
+
+my $map_canvas = $map_f->Scrolled('Canvas',
+    -scrollbars => 'osoe',
+    -background => '#1a1a2e',
+)->pack(-expand => 1, -fill => 'both');
+my $map_canvas_inner = $map_canvas->Subwidget('scrolled');
+
+# -- Row 2: Text output
+my $out_f = $mw->Frame(-borderwidth => 1, -relief => 'groove');
+$out_f->grid('-', -sticky => 'nsew', -padx => 0, -pady => 0);
+
+my $out = $out_f->Scrolled('ROText',
+    -scrollbars => 'oe', -background => 'white',
+    -relief => 'flat', -height => 8, -wrap => 'none',
+    -font => ['monospace', 9],
+)->pack(-expand => 1, -fill => 'both');
+
+# -- Row 3: Status bar
+my $status_f = $mw->Frame(-borderwidth => 0);
+$status_f->grid('-', -sticky => 'ew', -padx => 0, -pady => 0);
+
+$status_f->Label(
+    -anchor => 'w', -textvariable => \$status_msg,
+    -padx => 8, -font => ['sans', 8], -relief => 'sunken',
+)->pack(-expand => 1, -fill => 'x');
+
+# Grid weights: main area expands vertically
+$mw->gridRowconfigure(0, -weight => 0);
+$mw->gridRowconfigure(1, -weight => 3);
+$mw->gridRowconfigure(2, -weight => 1);
+$mw->gridRowconfigure(3, -weight => 0);
+$mw->gridColumnconfigure(0, -weight => 1);
+
+# ── Initialize map ────────────────────────────────────────
+
+draw_map_background();
+
+# ── Listbox selection → compute + draw ────────────────────
+
+$nm_ls->Subwidget('scrolled')->bind('<<ListboxSelect>>' => sub {
+    my @sel = $nm_ls->curselection;
+    return unless @sel;
+    do_central_line($sel[0]);
+});
+
+# ── Run ───────────────────────────────────────────────────
+
+MainLoop;
+
+# ══════════════════════════════════════════════════════════
+# Callbacks
+# ══════════════════════════════════════════════════════════
+
+sub _rebuild_engine {
+    $engine = Saros::Engine->new(
+        use_delta_t => $dt_var,
+        earth_model => $earth_model,
+    );
+}
+
+sub do_calculate {
+    unless (defined $from_year && defined $to_year
+            && $from_year =~ /^-?\d+$/ && $to_year =~ /^-?\d+$/) {
+        $status_msg = "Please enter valid year numbers.";
+        return;
+    }
+    if ($to_year < $from_year) {
+        $status_msg = "Error: 'From' year must be <= 'To' year.";
+        return;
+    }
+
+    $nm_ls->delete(0, 'end');
+    @eclipse_candidates = ();
+    @last_central_line = ();
+    $last_eclipse_label = undef;
+
+    $status_msg = "Calculating new moons $from_year-$to_year...";
+    $mw->update;
+
+    my $all = $engine->find_new_moons($from_year * 1, $to_year * 1);
+
+    $out->insert('end',
+        "\tNew Moons $from_year - $to_year\n" .
+        "\t===========================\n\n");
+
+    my $hdr = sprintf "  %-12s %9s %9s\n",
+        'Date', 'Hour', 'Beta';
+    $out->insert('end', $hdr);
+
+    for my $nm (@$all) {
+        my $date = sprintf("%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year});
+        my $line = sprintf "  %-12s %9.5f % 9.5f",
+            $date, $nm->{hour}, $nm->{beta};
+        if ($nm->{eclipse_possible}) {
+            $out->insert('end', "$line  << eclipse\n");
+            my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
+            $nm_ls->insert('end', $label);
+            push @eclipse_candidates, $nm;
+        } else {
+            $out->insert('end', "$line\n");
+        }
+    }
+    $out->insert('end', "\n");
+    $out->see('end');
+
+    draw_map_background();
+
+    my $n = scalar @eclipse_candidates;
+    $status_msg = "$n eclipse candidate(s) found. " .
+        ($n ? "Click one in the list to see its path." : "");
+}
+
+sub do_central_line {
+    my ($index) = @_;
+    return unless defined $index && $index >= 0 && $index <= $#eclipse_candidates;
+
+    my $nm = $eclipse_candidates[$index];
+    $last_eclipse_label = sprintf "%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year};
+
+    $status_msg = "Computing central line for $last_eclipse_label...";
+    $mw->update;
+
+    my $line = $engine->calculate_central_line($nm);
+    @last_central_line = @$line;
+
+    # Print to text output
+    $out->insert('end',
+        "\tCentral Line: $last_eclipse_label\n" .
+        "\t" . ("=" x 44) . "\n\n");
+
+    my $hdr = sprintf "  %-12s  %-5s  %-12s  %8s %8s\n",
+        'Date', 'UT', 'Phase', 'Lon', 'Lat';
+    $out->insert('end', $hdr);
+
+    for my $pt (@$line) {
+        my $lon_str = defined($pt->{geo_lon}) ? sprintf("% 8.3f", $pt->{geo_lon}) : '     ---';
+        my $lat_str = defined($pt->{geo_lat}) ? sprintf("% 8.3f", $pt->{geo_lat}) : '     ---';
+        my $date = sprintf("%d.%d.%d", $pt->{day}, $pt->{month}, $pt->{year});
+        my $row = sprintf "  %-12s  %-5s  %-12s  %s %s\n",
+            $date, $pt->{h_m_time}, $pt->{phase}, $lon_str, $lat_str;
+        $out->insert('end', $row);
+    }
+    $out->insert('end', "\n");
+    $out->see('end');
+
+    # Draw on the map
+    redraw_map();
+
+    my @central = grep { $_->{phase} eq 'central' && defined $_->{geo_lon} } @$line;
+    $status_msg = "Eclipse $last_eclipse_label: " .
+        scalar(@central) . " central line points plotted.";
+}
+
+# ── Map Drawing ───────────────────────────────────────────
+
+my ($map_img_w, $map_img_h) = (540, 420);  # current map dimensions
+
+sub _load_map_image {
+    my $map_file = ($projection_type eq 'azimuthal_equidistant' && $AZMAP ne '')
+        ? $AZMAP : $WORLDMAP;
+
+    $map_photo->delete if $map_photo;
+    $map_photo = undef;
+
+    if ($HAS_JPEG && defined($map_file) && -e $map_file) {
+        eval {
+            $map_photo = $mw->Photo(-format => 'jpeg', -file => $map_file);
+            $map_img_w = $map_photo->width;
+            $map_img_h = $map_photo->height;
+        };
+        if ($@ || !$map_img_w || !$map_img_h) {
+            $map_photo = undef;
+        }
+    }
+
+    # Defaults when no image
+    $map_img_w ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 540;
+    $map_img_h ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 420;
+}
+
+sub draw_map_background {
+    _load_map_image();
+
+    my $c = $map_canvas_inner;
+    $c->delete('all');
+    $c->configure(-scrollregion => [0, 0, $map_img_w, $map_img_h]);
+
+    if ($map_photo) {
+        $c->createImage(0, 0, -anchor => 'nw', -image => $map_photo);
+    } else {
+        # Synthesize graticule on dark background
+        $c->createRectangle(0, 0, $map_img_w, $map_img_h,
+            -fill => '#1a1a2e', -outline => '');
+        my $proj = _build_projection($map_img_w, $map_img_h);
+
+        if ($projection_type eq 'azimuthal_equidistant') {
+            for my $lat (-75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75) {
+                my @pts;
+                for (my $lon = 0; $lon < 362; $lon += 2) {
+                    my ($x, $y) = $proj->project($lat, $lon);
+                    push @pts, $x, $y if defined $x;
+                }
+                push @pts, $pts[0], $pts[1] if @pts >= 4;
+                $c->createLine(@pts,
+                    -fill => '#333355', -width => 1, -tags => 'grid') if @pts >= 4;
+            }
+            for (my $lon = 0; $lon < 360; $lon += 30) {
+                my @pts;
+                for (my $lat = -85; $lat <= 85; $lat += 5) {
+                    my ($x, $y) = $proj->project($lat, $lon);
+                    push @pts, $x, $y if defined $x;
+                }
+                $c->createLine(@pts,
+                    -fill => '#333355', -width => 1, -tags => 'grid') if @pts >= 4;
+            }
+        } else {
+            for my $lat (-60, -30, 0, 30, 60) {
+                my ($x1, $y1) = $proj->project($lat, -180);
+                my ($x2, $y2) = $proj->project($lat, 180);
+                $c->createLine($x1, $y1, $x2, $y2,
+                    -fill => '#333355', -tags => 'grid') if defined $y1;
+            }
+            for (my $lon = -180; $lon <= 180; $lon += 30) {
+                my @pts;
+                for (my $lat = -79; $lat <= 79; $lat += 5) {
+                    my ($x, $y) = $proj->project($lat, $lon);
+                    push @pts, $x, $y if defined $x;
+                }
+                $c->createLine(@pts,
+                    -fill => '#333355', -width => 1, -tags => 'grid') if @pts >= 4;
+            }
+        }
+    }
+}
+
+sub redraw_map {
+    draw_map_background();
+    return unless @last_central_line;
+
+    my $c = $map_canvas_inner;
+    my $proj = _build_projection($map_img_w, $map_img_h);
+
+    # Draw central points as bright connected line + dots
+    my @line_pts;
+    for my $pt (@last_central_line) {
+        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+        my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+        next unless defined $x && defined $y;
+        next if $x < 0 || $x > $map_img_w || $y < 0 || $y > $map_img_h;
+        push @line_pts, $x, $y;
+    }
+
+    # Draw connecting line
+    if (@line_pts >= 4) {
+        $c->createLine(@line_pts,
+            -fill => '#ff4444', -width => 2,
+            -smooth => 1, -tags => 'eclipse');
+    }
+
+    # Draw dots on top
+    for (my $i = 0; $i < @line_pts; $i += 2) {
+        my ($x, $y) = ($line_pts[$i], $line_pts[$i+1]);
+        my $r = 3;
+        $c->createOval($x-$r, $y-$r, $x+$r, $y+$r,
+            -fill => '#ffcc00', -outline => '#ff4444', -tags => 'eclipse');
+    }
+
+    # Label with eclipse date
+    if ($last_eclipse_label && @line_pts >= 2) {
+        my ($lx, $ly) = ($line_pts[0], $line_pts[1]);
+        $c->createText($lx, $ly - 12,
+            -text => $last_eclipse_label, -fill => '#ffffff',
+            -font => ['sans', 8, 'bold'], -anchor => 'sw', -tags => 'eclipse');
+    }
+}
+
+# ── Projection Builder ────────────────────────────────────
+
+sub _build_projection {
+    my ($img_w, $img_h) = @_;
+    my %args = (type => $projection_type, width => $img_w, height => $img_h);
+
+    if ($projection_type eq 'mercator') {
+        $args{extent_west}  = $extent{merc_west}  if $extent{merc_west}  ne '';
+        $args{extent_east}  = $extent{merc_east}  if $extent{merc_east}  ne '';
+        $args{extent_north} = $extent{merc_north} if $extent{merc_north} ne '';
+        $args{extent_south} = $extent{merc_south} if $extent{merc_south} ne '';
+    } else {
+        $args{center_lat}    = $extent{az_center_lat} if $extent{az_center_lat} ne '';
+        $args{center_lon}    = $extent{az_center_lon} if $extent{az_center_lon} ne '';
+        $args{extent_radius} = $extent{az_radius}     if $extent{az_radius}     ne '';
+    }
+    $args{image_x} = $extent{img_x} if $extent{img_x} ne '';
+    $args{image_y} = $extent{img_y} if $extent{img_y} ne '';
+    $args{image_w} = $extent{img_w} if $extent{img_w} ne '';
+    $args{image_h} = $extent{img_h} if $extent{img_h} ne '';
+
+    return Saros::Projection->new(%args);
+}
+
+# ── Extent Editor ─────────────────────────────────────────
+
+sub edit_extent {
+    my $dlg = $mw->Toplevel(-title => 'Map Extent Settings');
+    $dlg->geometry('+' . ($mw->x + 60) . '+' . ($mw->y + 60));
+
+    my $nb = $dlg->Frame->pack(-fill => 'both', -expand => 1, -padx => 10, -pady => 10);
+
+    my $mf = $nb->Labelframe(-text => 'Mercator Extent (degrees)', -padx => 8, -pady => 5)
+        ->pack(-fill => 'x', -pady => 5);
+    _extent_row($mf, 'West longitude:',  \$extent{merc_west},  '-180');
+    _extent_row($mf, 'East longitude:',  \$extent{merc_east},  '180');
+    _extent_row($mf, 'North latitude:',  \$extent{merc_north}, '80');
+    _extent_row($mf, 'South latitude:',  \$extent{merc_south}, '-80');
+
+    my $af = $nb->Labelframe(-text => 'Azimuthal Equidistant (degrees)', -padx => 8, -pady => 5)
+        ->pack(-fill => 'x', -pady => 5);
+    _extent_row($af, 'Center latitude:',  \$extent{az_center_lat}, '90');
+    _extent_row($af, 'Center longitude:', \$extent{az_center_lon}, '0');
+    _extent_row($af, 'Angular radius:',   \$extent{az_radius},     '180');
+
+    my $rf = $nb->Labelframe(-text => 'Image Region (pixels, blank = full image)', -padx => 8, -pady => 5)
+        ->pack(-fill => 'x', -pady => 5);
+    _extent_row($rf, 'Left (x):',   \$extent{img_x}, '0');
+    _extent_row($rf, 'Top (y):',    \$extent{img_y}, '0');
+    _extent_row($rf, 'Width:',      \$extent{img_w}, 'image width');
+    _extent_row($rf, 'Height:',     \$extent{img_h}, 'image height');
+
+    my $bf = $nb->Frame->pack(-fill => 'x', -pady => 8);
+    $bf->Button(-text => 'Reset Defaults', -command => sub {
+        $extent{$_} = '' for keys %extent;
+    })->pack(-side => 'left', -padx => 5);
+    $bf->Button(-text => 'Apply & Redraw', -command => sub {
+        redraw_map();
+    })->pack(-side => 'left', -padx => 5);
+    $bf->Button(-text => 'Close', -command => sub { $dlg->destroy })
+        ->pack(-side => 'right', -padx => 5);
+}
+
+sub _extent_row {
+    my ($parent, $label, $varref, $placeholder) = @_;
+    my $f = $parent->Frame->pack(-fill => 'x', -pady => 2);
+    $f->Label(-text => $label, -width => 20, -anchor => 'w')
+        ->pack(-side => 'left');
+    $f->Entry(-textvariable => $varref, -width => 12)
+        ->pack(-side => 'left', -padx => 5);
+    $f->Label(-text => "(default: $placeholder)", -foreground => '#666666')
+        ->pack(-side => 'left');
+}
+
+# ── Save Image ────────────────────────────────────────────
+
+sub save_image {
+    my ($type) = @_;
+    unless ($HAS_GD) {
+        $status_msg = "GD module not available - cannot export images.";
+        return;
+    }
+    unless (@last_central_line) {
+        $status_msg = "No eclipse data to save. Compute a central line first.";
+        return;
+    }
+
+    my $file = $mw->getSaveFile(
+        -defaultextension => ".$type",
+        -filetypes => [[uc($type), ".$type"]],
+    );
+    return unless $file;
+
+    my $map_file = ($projection_type eq 'azimuthal_equidistant' && $AZMAP ne '')
+        ? $AZMAP : $WORLDMAP;
+
+    my ($img, $img_w, $img_h);
+    if (defined($map_file) && -e $map_file) {
+        open my $fh, '<', $map_file or do {
+            $status_msg = "Cannot open $map_file: $!";
+            return;
+        };
+        $img = GD::Image->newFromJpeg($fh);
+        close $fh;
+        ($img_w, $img_h) = $img->getBounds;
+    } else {
+        $img_w = ($projection_type eq 'azimuthal_equidistant') ? 600 : 540;
+        $img_h = ($projection_type eq 'azimuthal_equidistant') ? 600 : 420;
+        $img = GD::Image->new($img_w, $img_h);
+        $img->colorAllocate(26, 26, 46);
+    }
+
+    my $proj = _build_projection($img_w, $img_h);
+    my $red  = $img->colorAllocate(255, 68, 68);
+    my $gold = $img->colorAllocate(255, 204, 0);
+
+    for my $pt (@last_central_line) {
+        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+        my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+        next unless defined $x && defined $y;
+        next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
+
+        $img->filledArc($x, $y, 6, 6, 0, 360, $gold);
+        $img->arc($x, $y, 8, 8, 0, 360, $red);
+    }
+
+    open my $fh, '>', $file or do {
+        $status_msg = "Cannot save $file: $!";
+        return;
+    };
+    binmode $fh;
+    print $fh ($type eq 'jpg' ? $img->jpeg(85) : $img->png);
+    close $fh;
+    $status_msg = "Saved: $file";
+}
+
+# ── Save Text ─────────────────────────────────────────────
+
+sub save_text {
+    unless (@last_central_line) {
+        $status_msg = "No eclipse data to save.";
+        return;
+    }
+
+    my $file = $mw->getSaveFile(
+        -defaultextension => '.txt',
+        -filetypes => [['Text files', '.txt'], ['All files', '*']],
+    );
+    return unless $file;
+
+    open my $fh, '>', $file or do {
+        $status_msg = "Cannot save $file: $!";
+        return;
+    };
+
+    print $fh "Saros $VERSION - Solar Eclipse Report\n";
+    print $fh "Central Line: $last_eclipse_label\n\n";
+
+    printf $fh "%-8s  %8s  %8s\n", "Time(UT)", "Lon", "Lat";
+    printf $fh "%s\n", "-" x 30;
+
+    for my $pt (@last_central_line) {
+        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+        printf $fh "%-8s  %+8.3f  %+8.3f\n",
+            $pt->{h_m_time}, $pt->{geo_lon}, $pt->{geo_lat};
+    }
+
+    close $fh;
+    $status_msg = "Saved: $file";
+}
+
+# ── About ─────────────────────────────────────────────────
+
+sub show_about {
+    my $tl = $mw->Toplevel(-title => 'About Saros');
+    $tl->Label(
+        -justify    => 'left',
+        -padx       => 15,
+        -pady       => 15,
+        -wraplength => 420,
+        -text       => "Saros $VERSION\n\n" .
+            "Solar eclipse calculator.\n\n" .
+            "Refactored from the original by Sebastian Harl\n" .
+            "(Adam-Kraft-Gymnasium Schwabach, 2003).\n\n" .
+            "v2.0 improvements:\n" .
+            "  - Modular architecture\n" .
+            "  - \x{0394}T correction (Espenak & Meeus)\n" .
+            "  - WGS84 ellipsoidal Earth model\n" .
+            "  - Azimuthal equidistant projection\n\n" .
+            "Licensed under the GNU General Public License v2.",
+    )->pack;
+    $tl->Button(-text => 'Close', -command => sub { $tl->destroy })->pack(-pady => 10);
+}
