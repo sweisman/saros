@@ -22,7 +22,7 @@ use Saros::Calendar qw(chopdigits);
 my $VERSION = "2.0";
 my $WORLDMAP = $ENV{SAROS_WORLDMAP}
     // "$RealBin/world.jpg";
-my $AZMAP = $ENV{SAROS_AZMAP} // '';
+my $AZMAP = $ENV{SAROS_AZMAP} // "$RealBin/gleason-ae.jpg";
 
 my $HAS_JPEG = eval { require Tk::JPEG; 1 } // 0;
 my $HAS_GD   = eval { require GD; 1 }       // 0;
@@ -59,9 +59,10 @@ my $earth_model = 'wgs84';
 my %extent = (
     merc_west  => '', merc_east  => '',
     merc_north => '', merc_south => '',
-    az_center_lat => '', az_center_lon => '',
-    az_radius     => '',
-    img_x => '', img_y => '', img_w => '', img_h => '',
+    az_center_lat => '90', az_center_lon => '-90',
+    az_radius     => '150',
+    az_img_x => '114', az_img_y => '276', az_img_w => '528', az_img_h => '528',
+    merc_img_x => '', merc_img_y => '', merc_img_w => '', merc_img_h => '',
 );
 
 # ── Main Window ───────────────────────────────────────────
@@ -155,13 +156,18 @@ $btn_f->Button(-text => 'All', -font => ['sans', 7], -padx => 3, -pady => 0,
 $btn_f->Button(-text => 'None', -font => ['sans', 7], -padx => 3, -pady => 0,
     -command => \&deselect_all_eclipses)->pack(-side => 'left', -padx => 1);
 
-# Scrollable frame for checkboxes
-my $cb_scroll = $list_f->Scrolled('Pane',
-    -scrollbars => 'oe', -sticky => 'new',
-    -width => 170,
-)->pack(-expand => 1, -fill => 'both', -padx => 4, -pady => [0, 4]);
+# Scrollable frame for checkboxes using Canvas + Frame pattern
+my $cb_canvas = $list_f->Canvas(-width => 170, -highlightthickness => 0);
+my $cb_scrollbar = $list_f->Scrollbar(-orient => 'vertical', -command => ['yview', $cb_canvas]);
+$cb_canvas->configure(-yscrollcommand => ['set', $cb_scrollbar]);
+$cb_scrollbar->pack(-side => 'right', -fill => 'y', -pady => [0, 4]);
+$cb_canvas->pack(-side => 'left', -expand => 1, -fill => 'both', -padx => 4, -pady => [0, 4]);
 
-my $cb_frame = $cb_scroll->Subwidget('scrolled') // $cb_scroll;
+my $cb_frame = $cb_canvas->Frame;
+$cb_canvas->createWindow(0, 0, -window => $cb_frame, -anchor => 'nw', -tags => 'cb_win');
+$cb_frame->bind('<Configure>' => sub {
+    $cb_canvas->configure(-scrollregion => [$cb_canvas->bbox('all')]);
+});
 
 # Map canvas (right side of main area, scrollable for large images)
 my $map_f = $main_f->Frame(-borderwidth => 1, -relief => 'sunken');
@@ -346,29 +352,63 @@ sub deselect_all_eclipses {
 
 # ── Map Drawing ───────────────────────────────────────────
 
-my ($map_img_w, $map_img_h) = (540, 420);  # current map dimensions
+my ($map_img_w, $map_img_h) = (540, 420);    # display dimensions (scaled to viewport)
+my ($native_img_w, $native_img_h) = (540, 420);  # native image dimensions (for saving)
+my $map_display_photo;  # scaled Photo for canvas display
 
 sub _load_map_image {
     my $map_file = ($projection_type eq 'azimuthal_equidistant' && $AZMAP ne '')
         ? $AZMAP : $WORLDMAP;
 
+    # Clean up old photos (avoid double-delete when display == native)
+    if ($map_display_photo && $map_display_photo != $map_photo) {
+        $map_display_photo->delete;
+    }
+    $map_display_photo = undef;
     $map_photo->delete if $map_photo;
     $map_photo = undef;
 
     if ($HAS_JPEG && defined($map_file) && -e $map_file) {
         eval {
             $map_photo = $mw->Photo(-format => 'jpeg', -file => $map_file);
-            $map_img_w = $map_photo->width;
-            $map_img_h = $map_photo->height;
+            $native_img_w = $map_photo->width;
+            $native_img_h = $map_photo->height;
         };
-        if ($@ || !$map_img_w || !$map_img_h) {
+        if ($@ || !$native_img_w || !$native_img_h) {
             $map_photo = undef;
         }
     }
 
     # Defaults when no image
-    $map_img_w ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 540;
-    $map_img_h ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 420;
+    $native_img_w ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 540;
+    $native_img_h ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 420;
+
+    # Scale to fit viewport
+    $mw->update;  # ensure geometry is current
+    my $vp_w = $map_canvas_inner->width  || 500;
+    my $vp_h = $map_canvas_inner->height || 400;
+    my $scale_x = $vp_w / $native_img_w;
+    my $scale_y = $vp_h / $native_img_h;
+    my $scale = ($scale_x < $scale_y) ? $scale_x : $scale_y;
+    $scale = 1.0 if $scale > 1.0;  # don't upscale
+
+    $map_img_w = int($native_img_w * $scale);
+    $map_img_h = int($native_img_h * $scale);
+
+    # Create scaled display photo
+    if ($map_photo && $scale < 1.0) {
+        $map_display_photo = $mw->Photo;
+        # Tk Photo subsample: integer factor only, use nearest
+        # For arbitrary scale, copy to a sized photo
+        $map_display_photo->copy($map_photo,
+            -subsample => int(1 / $scale + 0.5), int(1 / $scale + 0.5));
+        $map_img_w = $map_display_photo->width;
+        $map_img_h = $map_display_photo->height;
+    } elsif ($map_photo) {
+        $map_display_photo = $map_photo;
+        $map_img_w = $native_img_w;
+        $map_img_h = $native_img_h;
+    }
 }
 
 sub draw_map_background {
@@ -378,8 +418,8 @@ sub draw_map_background {
     $c->delete('all');
     $c->configure(-scrollregion => [0, 0, $map_img_w, $map_img_h]);
 
-    if ($map_photo) {
-        $c->createImage(0, 0, -anchor => 'nw', -image => $map_photo);
+    if ($map_display_photo) {
+        $c->createImage(0, 0, -anchor => 'nw', -image => $map_display_photo);
     } else {
         # Synthesize graticule on dark background
         $c->createRectangle(0, 0, $map_img_w, $map_img_h,
@@ -472,21 +512,11 @@ sub _draw_eclipse_path {
             -fill => $color, -outline => '', -tags => 'eclipse');
     }
 
-    # Place number label at start and midpoint of path
+    # Place number label at start of path
     if (@line_pts >= 2) {
-        my $label = "$num";
-        # Label at start of path
         $c->createText($line_pts[0] - 2, $line_pts[1] - 8,
-            -text => $label, -fill => $color,
+            -text => "$num", -fill => $color,
             -font => ['sans', 7, 'bold'], -anchor => 'e', -tags => 'eclipse');
-
-        # Label at midpoint if path is long enough
-        if (@line_pts >= 8) {
-            my $mid = int(@line_pts / 4) * 2;  # index of midpoint (even)
-            $c->createText($line_pts[$mid], $line_pts[$mid + 1] - 8,
-                -text => $label, -fill => $color,
-                -font => ['sans', 7, 'bold'], -anchor => 's', -tags => 'eclipse');
-        }
     }
 }
 
@@ -506,10 +536,29 @@ sub _build_projection {
         $args{center_lon}    = $extent{az_center_lon} if $extent{az_center_lon} ne '';
         $args{extent_radius} = $extent{az_radius}     if $extent{az_radius}     ne '';
     }
-    $args{image_x} = $extent{img_x} if $extent{img_x} ne '';
-    $args{image_y} = $extent{img_y} if $extent{img_y} ne '';
-    $args{image_w} = $extent{img_w} if $extent{img_w} ne '';
-    $args{image_h} = $extent{img_h} if $extent{img_h} ne '';
+
+    # Pick image region for current projection type
+    my ($ix, $iy, $iw, $ih);
+    if ($projection_type eq 'mercator') {
+        $ix = $extent{merc_img_x}; $iy = $extent{merc_img_y};
+        $iw = $extent{merc_img_w}; $ih = $extent{merc_img_h};
+    } else {
+        $ix = $extent{az_img_x}; $iy = $extent{az_img_y};
+        $iw = $extent{az_img_w}; $ih = $extent{az_img_h};
+    }
+
+    # Image region values are calibrated to native image dimensions.
+    # Scale uniformly when rendering at different size (e.g. display vs save).
+    my $scale = 1;
+    if ($native_img_w > 0 && $native_img_h > 0) {
+        my $sx = $img_w / $native_img_w;
+        my $sy = $img_h / $native_img_h;
+        $scale = ($sx < $sy) ? $sx : $sy;
+    }
+    $args{image_x} = $ix * $scale if $ix ne '';
+    $args{image_y} = $iy * $scale if $iy ne '';
+    $args{image_w} = $iw * $scale if $iw ne '';
+    $args{image_h} = $ih * $scale if $ih ne '';
 
     return Saros::Projection->new(%args);
 }
@@ -535,12 +584,19 @@ sub edit_extent {
     _extent_row($af, 'Center longitude:', \$extent{az_center_lon}, '0');
     _extent_row($af, 'Angular radius:',   \$extent{az_radius},     '180');
 
-    my $rf = $nb->Labelframe(-text => 'Image Region (pixels, blank = full image)', -padx => 8, -pady => 5)
+    my $mrf = $nb->Labelframe(-text => 'Mercator Image Region (pixels, blank = full image)', -padx => 8, -pady => 5)
         ->pack(-fill => 'x', -pady => 5);
-    _extent_row($rf, 'Left (x):',   \$extent{img_x}, '0');
-    _extent_row($rf, 'Top (y):',    \$extent{img_y}, '0');
-    _extent_row($rf, 'Width:',      \$extent{img_w}, 'image width');
-    _extent_row($rf, 'Height:',     \$extent{img_h}, 'image height');
+    _extent_row($mrf, 'Left (x):',   \$extent{merc_img_x}, '0');
+    _extent_row($mrf, 'Top (y):',    \$extent{merc_img_y}, '0');
+    _extent_row($mrf, 'Width:',      \$extent{merc_img_w}, 'image width');
+    _extent_row($mrf, 'Height:',     \$extent{merc_img_h}, 'image height');
+
+    my $arf = $nb->Labelframe(-text => 'AE Image Region (pixels, blank = full image)', -padx => 8, -pady => 5)
+        ->pack(-fill => 'x', -pady => 5);
+    _extent_row($arf, 'Left (x):',   \$extent{az_img_x}, '114');
+    _extent_row($arf, 'Top (y):',    \$extent{az_img_y}, '276');
+    _extent_row($arf, 'Width:',      \$extent{az_img_w}, '528');
+    _extent_row($arf, 'Height:',     \$extent{az_img_h}, '528');
 
     my $bf = $nb->Frame->pack(-fill => 'x', -pady => 8);
     $bf->Button(-text => 'Reset Defaults', -command => sub {
@@ -654,15 +710,10 @@ sub _draw_eclipse_path_gd {
         $img->filledArc($pt->[0], $pt->[1], 5, 5, 0, 360, $color);
     }
 
-    # Number labels at start and midpoint
+    # Number label at start of path
     if (@pts) {
         $img->string(GD::gdSmallFont(), $pts[0][0] - 10, $pts[0][1] - 14,
             "$num", $color);
-        if (@pts >= 4) {
-            my $mid = int(@pts / 2);
-            $img->string(GD::gdSmallFont(), $pts[$mid][0], $pts[$mid][1] - 14,
-                "$num", $color);
-        }
     }
 }
 
