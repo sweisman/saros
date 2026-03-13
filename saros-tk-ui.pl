@@ -49,7 +49,7 @@ my @PATH_COLORS = (
 my $engine = Saros::Engine->new(use_delta_t => 1, earth_model => 'wgs84');
 my $projection_type = 'mercator';
 my ($from_year, $to_year);
-my @eclipse_candidates;     # { nm => ..., number => N, color => ..., plot_var => \$var, central_line => [...] }
+my @eclipse_candidates;     # { nm => ..., number => N, color => ..., plotted => 0|1, central_line => [...] }
 my $map_photo;              # keep Tk Photo alive for canvas
 my $status_msg = "Enter a year range and click Calculate.";
 my $dt_var = 1;
@@ -263,14 +263,13 @@ sub do_calculate {
             $out->insert('end', "$line  << eclipse\n");
             $eclipse_num++;
             my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
-            my $plot_var = 0;
             my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
             push @eclipse_candidates, {
                 nm           => $nm,
                 number       => $eclipse_num,
                 color        => $color,
                 label        => $label,
-                plot_var     => \$plot_var,
+                plotted      => 0,
                 central_line => undef,  # computed on demand
             };
         } else {
@@ -290,13 +289,16 @@ sub do_calculate {
         $swatch->pack(-side => 'left', -padx => [4, 0], -pady => 1);
         $swatch->createRectangle(1, 1, 12, 12, -fill => $ec->{color}, -outline => '');
 
-        $f->Checkbutton(
+        my $cb = $f->Checkbutton(
             -text     => sprintf("%2d  %s", $ec->{number}, $ec->{label}),
-            -variable => $ec->{plot_var},
             -font     => ['monospace', 9],
             -anchor   => 'w',
-            -command  => sub { on_checkbox_toggle($ec) },
+            -command  => sub {
+                $ec->{plotted} = $ec->{plotted} ? 0 : 1;
+                on_checkbox_toggle($ec);
+            },
         )->pack(-side => 'left', -padx => 2);
+        $ec->{_cb} = $cb;  # keep reference for select_all/deselect_all
     }
 
     draw_map_background();
@@ -308,7 +310,7 @@ sub do_calculate {
 
 sub on_checkbox_toggle {
     my ($ec) = @_;
-    if (${$ec->{plot_var}} && !$ec->{central_line}) {
+    if ($ec->{plotted} && !$ec->{central_line}) {
         # Compute central line on first check
         $status_msg = "Computing central line for #$ec->{number} $ec->{label}...";
         $mw->update;
@@ -338,14 +340,16 @@ sub on_checkbox_toggle {
 
 sub select_all_eclipses {
     for my $ec (@eclipse_candidates) {
-        ${$ec->{plot_var}} = 1;
+        $ec->{plotted} = 1;
+        $ec->{_cb}->select if $ec->{_cb};
         on_checkbox_toggle($ec);
     }
 }
 
 sub deselect_all_eclipses {
     for my $ec (@eclipse_candidates) {
-        ${$ec->{plot_var}} = 0;
+        $ec->{plotted} = 0;
+        $ec->{_cb}->deselect if $ec->{_cb};
     }
     redraw_map();
 }
@@ -474,7 +478,7 @@ sub redraw_map {
 
     my $plotted = 0;
     for my $ec (@eclipse_candidates) {
-        next unless ${$ec->{plot_var}} && $ec->{central_line};
+        next unless $ec->{plotted} && $ec->{central_line};
         _draw_eclipse_path($c, $proj, $ec);
         $plotted++;
     }
@@ -630,7 +634,7 @@ sub save_image {
     }
 
     # Check if anything is plotted
-    my @plotted = grep { ${$_->{plot_var}} && $_->{central_line} } @eclipse_candidates;
+    my @plotted = grep { $_->{plotted} && $_->{central_line} } @eclipse_candidates;
     unless (@plotted) {
         $status_msg = "No eclipse paths to save. Check some boxes first.";
         return;
@@ -720,7 +724,7 @@ sub _draw_eclipse_path_gd {
 # ── Save Text ─────────────────────────────────────────────
 
 sub save_text {
-    my @plotted = grep { ${$_->{plot_var}} && $_->{central_line} } @eclipse_candidates;
+    my @plotted = grep { $_->{plotted} && $_->{central_line} } @eclipse_candidates;
     unless (@plotted) {
         $status_msg = "No eclipse data to save.";
         return;
