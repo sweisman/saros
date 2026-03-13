@@ -27,14 +27,29 @@ my $AZMAP = $ENV{SAROS_AZMAP} // '';
 my $HAS_JPEG = eval { require Tk::JPEG; 1 } // 0;
 my $HAS_GD   = eval { require GD; 1 }       // 0;
 
+# ── Color palette for eclipse paths ──────────────────────
+
+my @PATH_COLORS = (
+    '#ff4444',  # red
+    '#44aaff',  # blue
+    '#44ff44',  # green
+    '#ffaa00',  # orange
+    '#ff44ff',  # magenta
+    '#00dddd',  # cyan
+    '#ffff44',  # yellow
+    '#ff8888',  # salmon
+    '#88aaff',  # periwinkle
+    '#88ff88',  # light green
+    '#ffcc88',  # peach
+    '#cc88ff',  # lavender
+);
+
 # ── State ─────────────────────────────────────────────────
 
 my $engine = Saros::Engine->new(use_delta_t => 1, earth_model => 'wgs84');
 my $projection_type = 'mercator';
 my ($from_year, $to_year);
-my @eclipse_candidates;
-my @last_central_line;
-my $last_eclipse_label;
+my @eclipse_candidates;     # { nm => ..., number => N, color => ..., plot_var => \$var, central_line => [...] }
 my $map_photo;              # keep Tk Photo alive for canvas
 my $status_msg = "Enter a year range and click Calculate.";
 my $dt_var = 1;
@@ -92,7 +107,7 @@ $mw->bind('<Return>' => \&do_calculate);
 # ── Layout ────────────────────────────────────────────────
 # Structure:
 #   Row 0: input bar (year range, calculate, options)
-#   Row 1: [eclipse list | map canvas] (main area, expands)
+#   Row 1: [eclipse checkbox list | map canvas] (main area, expands)
 #   Row 2: text output (collapsible detail)
 #   Row 3: status bar
 
@@ -126,18 +141,27 @@ $input_f->Optionmenu(
 my $main_f = $mw->Frame;
 $main_f->grid('-', -sticky => 'nsew', -padx => 0, -pady => 0);
 
-# Eclipse list (left side of main area)
+# Eclipse checkbox list (left side of main area)
 my $list_f = $main_f->Frame(-borderwidth => 1, -relief => 'groove');
 $list_f->pack(-side => 'left', -fill => 'y', -padx => 0, -pady => 0);
 
-$list_f->Label(-text => 'Eclipses', -font => ['sans', 9, 'bold'])
-    ->pack(-pady => [6, 2]);
+my $list_header_f = $list_f->Frame->pack(-fill => 'x', -pady => [4, 0]);
+$list_header_f->Label(-text => 'Eclipses', -font => ['sans', 9, 'bold'])
+    ->pack(-side => 'left', -padx => [8, 0]);
 
-my $nm_ls = $list_f->Scrolled('Listbox',
-    -scrollbars => 'oe', -relief => 'flat',
-    -selectmode => 'single', -width => 16, -height => 10,
-    -font => ['monospace', 9],
+my $btn_f = $list_header_f->Frame->pack(-side => 'right', -padx => 4);
+$btn_f->Button(-text => 'All', -font => ['sans', 7], -padx => 3, -pady => 0,
+    -command => \&select_all_eclipses)->pack(-side => 'left', -padx => 1);
+$btn_f->Button(-text => 'None', -font => ['sans', 7], -padx => 3, -pady => 0,
+    -command => \&deselect_all_eclipses)->pack(-side => 'left', -padx => 1);
+
+# Scrollable frame for checkboxes
+my $cb_scroll = $list_f->Scrolled('Pane',
+    -scrollbars => 'oe', -sticky => 'new',
+    -width => 170,
 )->pack(-expand => 1, -fill => 'both', -padx => 4, -pady => [0, 4]);
+
+my $cb_frame = $cb_scroll->Subwidget('scrolled') // $cb_scroll;
 
 # Map canvas (right side of main area, scrollable for large images)
 my $map_f = $main_f->Frame(-borderwidth => 1, -relief => 'sunken');
@@ -179,14 +203,6 @@ $mw->gridColumnconfigure(0, -weight => 1);
 
 draw_map_background();
 
-# ── Listbox selection → compute + draw ────────────────────
-
-$nm_ls->Subwidget('scrolled')->bind('<<ListboxSelect>>' => sub {
-    my @sel = $nm_ls->curselection;
-    return unless @sel;
-    do_central_line($sel[0]);
-});
-
 # ── Run ───────────────────────────────────────────────────
 
 MainLoop;
@@ -213,10 +229,11 @@ sub do_calculate {
         return;
     }
 
-    $nm_ls->delete(0, 'end');
+    # Clear old checkboxes
+    for my $child ($cb_frame->children) {
+        $child->destroy;
+    }
     @eclipse_candidates = ();
-    @last_central_line = ();
-    $last_eclipse_label = undef;
 
     $status_msg = "Calculating new moons $from_year-$to_year...";
     $mw->update;
@@ -231,15 +248,25 @@ sub do_calculate {
         'Date', 'Hour', 'Beta';
     $out->insert('end', $hdr);
 
+    my $eclipse_num = 0;
     for my $nm (@$all) {
         my $date = sprintf("%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year});
         my $line = sprintf "  %-12s %9.5f % 9.5f",
             $date, $nm->{hour}, $nm->{beta};
         if ($nm->{eclipse_possible}) {
             $out->insert('end', "$line  << eclipse\n");
+            $eclipse_num++;
+            my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
+            my $plot_var = 0;
             my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
-            $nm_ls->insert('end', $label);
-            push @eclipse_candidates, $nm;
+            push @eclipse_candidates, {
+                nm           => $nm,
+                number       => $eclipse_num,
+                color        => $color,
+                label        => $label,
+                plot_var     => \$plot_var,
+                central_line => undef,  # computed on demand
+            };
         } else {
             $out->insert('end', "$line\n");
         }
@@ -247,52 +274,74 @@ sub do_calculate {
     $out->insert('end', "\n");
     $out->see('end');
 
+    # Build checkbox list
+    for my $ec (@eclipse_candidates) {
+        my $f = $cb_frame->Frame->pack(-fill => 'x', -anchor => 'w');
+
+        # Color swatch
+        my $swatch = $f->Canvas(-width => 12, -height => 12,
+            -highlightthickness => 0);
+        $swatch->pack(-side => 'left', -padx => [4, 0], -pady => 1);
+        $swatch->createRectangle(1, 1, 12, 12, -fill => $ec->{color}, -outline => '');
+
+        $f->Checkbutton(
+            -text     => sprintf("%2d  %s", $ec->{number}, $ec->{label}),
+            -variable => $ec->{plot_var},
+            -font     => ['monospace', 9],
+            -anchor   => 'w',
+            -command  => sub { on_checkbox_toggle($ec) },
+        )->pack(-side => 'left', -padx => 2);
+    }
+
     draw_map_background();
 
     my $n = scalar @eclipse_candidates;
     $status_msg = "$n eclipse candidate(s) found. " .
-        ($n ? "Click one in the list to see its path." : "");
+        ($n ? "Check boxes to plot paths." : "");
 }
 
-sub do_central_line {
-    my ($index) = @_;
-    return unless defined $index && $index >= 0 && $index <= $#eclipse_candidates;
+sub on_checkbox_toggle {
+    my ($ec) = @_;
+    if (${$ec->{plot_var}} && !$ec->{central_line}) {
+        # Compute central line on first check
+        $status_msg = "Computing central line for #$ec->{number} $ec->{label}...";
+        $mw->update;
+        my $line = $engine->calculate_central_line($ec->{nm});
+        $ec->{central_line} = $line;
 
-    my $nm = $eclipse_candidates[$index];
-    $last_eclipse_label = sprintf "%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year};
-
-    $status_msg = "Computing central line for $last_eclipse_label...";
-    $mw->update;
-
-    my $line = $engine->calculate_central_line($nm);
-    @last_central_line = @$line;
-
-    # Print to text output
-    $out->insert('end',
-        "\tCentral Line: $last_eclipse_label\n" .
-        "\t" . ("=" x 44) . "\n\n");
-
-    my $hdr = sprintf "  %-12s  %-5s  %-12s  %8s %8s\n",
-        'Date', 'UT', 'Phase', 'Lon', 'Lat';
-    $out->insert('end', $hdr);
-
-    for my $pt (@$line) {
-        my $lon_str = defined($pt->{geo_lon}) ? sprintf("% 8.3f", $pt->{geo_lon}) : '     ---';
-        my $lat_str = defined($pt->{geo_lat}) ? sprintf("% 8.3f", $pt->{geo_lat}) : '     ---';
-        my $date = sprintf("%d.%d.%d", $pt->{day}, $pt->{month}, $pt->{year});
-        my $row = sprintf "  %-12s  %-5s  %-12s  %s %s\n",
-            $date, $pt->{h_m_time}, $pt->{phase}, $lon_str, $lat_str;
-        $out->insert('end', $row);
+        # Print to text output
+        $out->insert('end',
+            "\tCentral Line #$ec->{number}: $ec->{label}\n" .
+            "\t" . ("=" x 44) . "\n\n");
+        my $hdr = sprintf "  %-12s  %-5s  %-12s  %8s %8s\n",
+            'Date', 'UT', 'Phase', 'Lon', 'Lat';
+        $out->insert('end', $hdr);
+        for my $pt (@$line) {
+            my $lon_str = defined($pt->{geo_lon}) ? sprintf("% 8.3f", $pt->{geo_lon}) : '     ---';
+            my $lat_str = defined($pt->{geo_lat}) ? sprintf("% 8.3f", $pt->{geo_lat}) : '     ---';
+            my $date = sprintf("%d.%d.%d", $pt->{day}, $pt->{month}, $pt->{year});
+            my $row = sprintf "  %-12s  %-5s  %-12s  %s %s\n",
+                $date, $pt->{h_m_time}, $pt->{phase}, $lon_str, $lat_str;
+            $out->insert('end', $row);
+        }
+        $out->insert('end', "\n");
+        $out->see('end');
     }
-    $out->insert('end', "\n");
-    $out->see('end');
-
-    # Draw on the map
     redraw_map();
+}
 
-    my @central = grep { $_->{phase} eq 'central' && defined $_->{geo_lon} } @$line;
-    $status_msg = "Eclipse $last_eclipse_label: " .
-        scalar(@central) . " central line points plotted.";
+sub select_all_eclipses {
+    for my $ec (@eclipse_candidates) {
+        ${$ec->{plot_var}} = 1;
+        on_checkbox_toggle($ec);
+    }
+}
+
+sub deselect_all_eclipses {
+    for my $ec (@eclipse_candidates) {
+        ${$ec->{plot_var}} = 0;
+    }
+    redraw_map();
 }
 
 # ── Map Drawing ───────────────────────────────────────────
@@ -379,14 +428,28 @@ sub draw_map_background {
 
 sub redraw_map {
     draw_map_background();
-    return unless @last_central_line;
 
     my $c = $map_canvas_inner;
     my $proj = _build_projection($map_img_w, $map_img_h);
 
-    # Draw central points as bright connected line + dots
+    my $plotted = 0;
+    for my $ec (@eclipse_candidates) {
+        next unless ${$ec->{plot_var}} && $ec->{central_line};
+        _draw_eclipse_path($c, $proj, $ec);
+        $plotted++;
+    }
+
+    $status_msg = "$plotted eclipse path(s) plotted." if $plotted;
+}
+
+sub _draw_eclipse_path {
+    my ($c, $proj, $ec) = @_;
+    my $color = $ec->{color};
+    my $num   = $ec->{number};
+    my @line  = @{$ec->{central_line}};
+
     my @line_pts;
-    for my $pt (@last_central_line) {
+    for my $pt (@line) {
         next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
         my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
         next unless defined $x && defined $y;
@@ -397,24 +460,33 @@ sub redraw_map {
     # Draw connecting line
     if (@line_pts >= 4) {
         $c->createLine(@line_pts,
-            -fill => '#ff4444', -width => 2,
+            -fill => $color, -width => 2,
             -smooth => 1, -tags => 'eclipse');
     }
 
     # Draw dots on top
     for (my $i = 0; $i < @line_pts; $i += 2) {
         my ($x, $y) = ($line_pts[$i], $line_pts[$i+1]);
-        my $r = 3;
+        my $r = 2;
         $c->createOval($x-$r, $y-$r, $x+$r, $y+$r,
-            -fill => '#ffcc00', -outline => '#ff4444', -tags => 'eclipse');
+            -fill => $color, -outline => '', -tags => 'eclipse');
     }
 
-    # Label with eclipse date
-    if ($last_eclipse_label && @line_pts >= 2) {
-        my ($lx, $ly) = ($line_pts[0], $line_pts[1]);
-        $c->createText($lx, $ly - 12,
-            -text => $last_eclipse_label, -fill => '#ffffff',
-            -font => ['sans', 8, 'bold'], -anchor => 'sw', -tags => 'eclipse');
+    # Place number label at start and midpoint of path
+    if (@line_pts >= 2) {
+        my $label = "$num";
+        # Label at start of path
+        $c->createText($line_pts[0] - 2, $line_pts[1] - 8,
+            -text => $label, -fill => $color,
+            -font => ['sans', 7, 'bold'], -anchor => 'e', -tags => 'eclipse');
+
+        # Label at midpoint if path is long enough
+        if (@line_pts >= 8) {
+            my $mid = int(@line_pts / 4) * 2;  # index of midpoint (even)
+            $c->createText($line_pts[$mid], $line_pts[$mid + 1] - 8,
+                -text => $label, -fill => $color,
+                -font => ['sans', 7, 'bold'], -anchor => 's', -tags => 'eclipse');
+        }
     }
 }
 
@@ -500,8 +572,11 @@ sub save_image {
         $status_msg = "GD module not available - cannot export images.";
         return;
     }
-    unless (@last_central_line) {
-        $status_msg = "No eclipse data to save. Compute a central line first.";
+
+    # Check if anything is plotted
+    my @plotted = grep { ${$_->{plot_var}} && $_->{central_line} } @eclipse_candidates;
+    unless (@plotted) {
+        $status_msg = "No eclipse paths to save. Check some boxes first.";
         return;
     }
 
@@ -531,17 +606,9 @@ sub save_image {
     }
 
     my $proj = _build_projection($img_w, $img_h);
-    my $red  = $img->colorAllocate(255, 68, 68);
-    my $gold = $img->colorAllocate(255, 204, 0);
 
-    for my $pt (@last_central_line) {
-        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
-        my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
-        next unless defined $x && defined $y;
-        next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
-
-        $img->filledArc($x, $y, 6, 6, 0, 360, $gold);
-        $img->arc($x, $y, 8, 8, 0, 360, $red);
+    for my $ec (@plotted) {
+        _draw_eclipse_path_gd($img, $img_w, $img_h, $proj, $ec);
     }
 
     open my $fh, '>', $file or do {
@@ -551,13 +618,59 @@ sub save_image {
     binmode $fh;
     print $fh ($type eq 'jpg' ? $img->jpeg(85) : $img->png);
     close $fh;
-    $status_msg = "Saved: $file";
+    $status_msg = "Saved " . scalar(@plotted) . " path(s): $file";
+}
+
+sub _hex_to_rgb {
+    my ($hex) = @_;
+    $hex =~ s/^#//;
+    return (hex(substr($hex,0,2)), hex(substr($hex,2,2)), hex(substr($hex,4,2)));
+}
+
+sub _draw_eclipse_path_gd {
+    my ($img, $img_w, $img_h, $proj, $ec) = @_;
+    my @rgb   = _hex_to_rgb($ec->{color});
+    my $color = $img->colorAllocate(@rgb);
+    my $white = $img->colorResolve(255, 255, 255);
+    my $num   = $ec->{number};
+
+    my @pts;
+    for my $pt (@{$ec->{central_line}}) {
+        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+        my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+        next unless defined $x && defined $y;
+        next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
+        push @pts, [$x, $y];
+    }
+
+    # Draw line segments
+    for my $i (1 .. $#pts) {
+        $img->line($pts[$i-1][0], $pts[$i-1][1],
+                   $pts[$i][0],   $pts[$i][1], $color);
+    }
+
+    # Draw dots
+    for my $pt (@pts) {
+        $img->filledArc($pt->[0], $pt->[1], 5, 5, 0, 360, $color);
+    }
+
+    # Number labels at start and midpoint
+    if (@pts) {
+        $img->string(GD::gdSmallFont(), $pts[0][0] - 10, $pts[0][1] - 14,
+            "$num", $color);
+        if (@pts >= 4) {
+            my $mid = int(@pts / 2);
+            $img->string(GD::gdSmallFont(), $pts[$mid][0], $pts[$mid][1] - 14,
+                "$num", $color);
+        }
+    }
 }
 
 # ── Save Text ─────────────────────────────────────────────
 
 sub save_text {
-    unless (@last_central_line) {
+    my @plotted = grep { ${$_->{plot_var}} && $_->{central_line} } @eclipse_candidates;
+    unless (@plotted) {
         $status_msg = "No eclipse data to save.";
         return;
     }
@@ -573,20 +686,23 @@ sub save_text {
         return;
     };
 
-    print $fh "Saros $VERSION - Solar Eclipse Report\n";
-    print $fh "Central Line: $last_eclipse_label\n\n";
+    print $fh "Saros $VERSION - Solar Eclipse Report\n\n";
 
-    printf $fh "%-8s  %8s  %8s\n", "Time(UT)", "Lon", "Lat";
-    printf $fh "%s\n", "-" x 30;
+    for my $ec (@plotted) {
+        printf $fh "Eclipse #%d: %s\n", $ec->{number}, $ec->{label};
+        printf $fh "%-8s  %8s  %8s\n", "Time(UT)", "Lon", "Lat";
+        printf $fh "%s\n", "-" x 30;
 
-    for my $pt (@last_central_line) {
-        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
-        printf $fh "%-8s  %+8.3f  %+8.3f\n",
-            $pt->{h_m_time}, $pt->{geo_lon}, $pt->{geo_lat};
+        for my $pt (@{$ec->{central_line}}) {
+            next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+            printf $fh "%-8s  %+8.3f  %+8.3f\n",
+                $pt->{h_m_time}, $pt->{geo_lon}, $pt->{geo_lat};
+        }
+        print $fh "\n";
     }
 
     close $fh;
-    $status_msg = "Saved: $file";
+    $status_msg = "Saved " . scalar(@plotted) . " eclipse(s): $file";
 }
 
 # ── About ─────────────────────────────────────────────────
@@ -607,7 +723,7 @@ sub show_about {
             "  - \x{0394}T correction (Espenak & Meeus)\n" .
             "  - WGS84 ellipsoidal Earth model\n" .
             "  - Azimuthal equidistant projection\n\n" .
-            "Licensed under the GNU General Public License v2.",
+            "Licensed under the GNU General Public License v3.",
     )->pack;
     $tl->Button(-text => 'Close', -command => sub { $tl->destroy })->pack(-pady => 10);
 }
