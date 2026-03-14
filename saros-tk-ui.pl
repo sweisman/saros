@@ -11,7 +11,6 @@ use FindBin qw($RealBin);
 use lib "$RealBin/lib";
 
 use Tk;
-use Tk::ROText;
 
 use Saros::Engine;
 use Saros::Projection;
@@ -30,18 +29,18 @@ my $HAS_GD   = eval { require GD; 1 }       // 0;
 # ── Color palette for eclipse paths ──────────────────────
 
 my @PATH_COLORS = (
-    '#ff4444',  # red
-    '#44aaff',  # blue
-    '#44ff44',  # green
-    '#ffaa00',  # orange
-    '#ff44ff',  # magenta
-    '#00dddd',  # cyan
-    '#ffff44',  # yellow
-    '#ff8888',  # salmon
-    '#88aaff',  # periwinkle
-    '#88ff88',  # light green
-    '#ffcc88',  # peach
-    '#cc88ff',  # lavender
+    '#ff0000',  # red
+    '#00ff00',  # green
+    '#ffff00',  # yellow
+    '#00ffff',  # cyan
+    '#ff00ff',  # magenta
+    '#ff8800',  # orange
+    '#00ff88',  # spring green
+    '#8800ff',  # violet
+    '#ff0088',  # hot pink
+    '#00bbff',  # sky blue
+    '#88ff00',  # chartreuse
+    '#ffffff',  # white
 );
 
 # ── State ─────────────────────────────────────────────────
@@ -63,14 +62,14 @@ my %extent = (
     merc_north => '', merc_south => '',
     az_center_lat => '90', az_center_lon => '-90',
     az_radius     => '150',
-    az_img_x => '114', az_img_y => '276', az_img_w => '528', az_img_h => '528',
+    az_img_x => '203', az_img_y => '491', az_img_w => '940', az_img_h => '940',
     merc_img_x => '', merc_img_y => '', merc_img_w => '', merc_img_h => '',
 );
 
 # ── Main Window ───────────────────────────────────────────
 
 my $mw = MainWindow->new(-title => "Saros $VERSION - Solar Eclipse Calculator");
-$mw->geometry('860x680+80+60');
+$mw->attributes('-zoomed', 1);
 $mw->protocol('WM_DELETE_WINDOW', sub { $mw->destroy; exit 0 });
 
 # ── Menu ──────────────────────────────────────────────────
@@ -84,7 +83,7 @@ if ($HAS_GD) {
     $img_menu->command(-label => 'As JPEG...', -command => sub { save_image('jpg') });
     $img_menu->command(-label => 'As PNG...',  -command => sub { save_image('png') });
 }
-$file_menu->command(-label => 'Save Report as Text...', -command => \&save_text);
+$file_menu->command(-label => 'Save Eclipse List...', -command => \&save_eclipse_list);
 $file_menu->separator;
 $file_menu->command(-label => 'Quit', -command => sub { $mw->destroy; exit 0 },
     -accelerator => 'Ctrl+Q');
@@ -111,8 +110,7 @@ $mw->bind('<Return>' => \&do_calculate);
 # Structure:
 #   Row 0: input bar (year range, calculate, options)
 #   Row 1: [eclipse checkbox list | map canvas] (main area, expands)
-#   Row 2: text output (collapsible detail)
-#   Row 3: status bar
+#   Row 2: status bar
 
 # -- Row 0: Input bar
 my $input_f = $mw->Frame(-borderwidth => 1, -relief => 'groove');
@@ -185,17 +183,10 @@ my $map_canvas = $map_f->Scrolled('Canvas',
 )->pack(-expand => 1, -fill => 'both');
 my $map_canvas_inner = $map_canvas->Subwidget('scrolled');
 
-# -- Row 2: Text output
-my $out_f = $mw->Frame(-borderwidth => 1, -relief => 'groove');
-$out_f->grid('-', -sticky => 'nsew', -padx => 0, -pady => 0);
+# Rescale map when canvas resizes
+$map_canvas_inner->bind('<Configure>' => sub { redraw_map() });
 
-my $out = $out_f->Scrolled('ROText',
-    -scrollbars => 'oe', -background => 'white',
-    -relief => 'flat', -height => 8, -wrap => 'none',
-    -font => ['monospace', 9],
-)->pack(-expand => 1, -fill => 'both');
-
-# -- Row 3: Status bar
+# -- Row 2: Status bar
 my $status_f = $mw->Frame(-borderwidth => 0);
 $status_f->grid('-', -sticky => 'ew', -padx => 0, -pady => 0);
 
@@ -206,9 +197,8 @@ $status_f->Label(
 
 # Grid weights: main area expands vertically
 $mw->gridRowconfigure(0, -weight => 0);
-$mw->gridRowconfigure(1, -weight => 3);
-$mw->gridRowconfigure(2, -weight => 1);
-$mw->gridRowconfigure(3, -weight => 0);
+$mw->gridRowconfigure(1, -weight => 1);
+$mw->gridRowconfigure(2, -weight => 0);
 $mw->gridColumnconfigure(0, -weight => 1);
 
 # ── Initialize map ────────────────────────────────────────
@@ -255,47 +245,29 @@ sub do_calculate {
 
     my $all = $engine->find_new_moons($from_year * 1, $to_year * 1);
 
-    $out->insert('end',
-        "\tNew Moons $from_year - $to_year\n" .
-        "\t===========================\n\n");
-
-    my $hdr = sprintf "  %-12s %9s %9s\n",
-        'Date', 'Hour', 'Beta';
-    $out->insert('end', $hdr);
-
     my $eclipse_num = 0;
     my $partial_count = 0;
     for my $nm (@$all) {
+        next unless $nm->{eclipse_possible};
         my $date = sprintf("%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year});
-        my $line = sprintf "  %-12s %9.5f % 9.5f",
-            $date, $nm->{hour}, $nm->{beta};
-        if ($nm->{eclipse_possible}) {
-            # Quick check: skip partial-only eclipses
-            $status_msg = "Checking $date...";
-            $mw->update;
-            if ($engine->has_central_line($nm)) {
-                $eclipse_num++;
-                $out->insert('end', "$line  << central eclipse\n");
-                my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
-                my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
-                push @eclipse_candidates, {
-                    nm           => $nm,
-                    number       => $eclipse_num,
-                    color        => $color,
-                    label        => $label,
-                    plotted      => 0,
-                    central_line => undef,  # computed on demand
-                };
-            } else {
-                $partial_count++;
-                $out->insert('end', "$line  (partial only)\n");
-            }
+        $status_msg = "Checking $date...";
+        $mw->update;
+        if ($engine->has_central_line($nm)) {
+            $eclipse_num++;
+            my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
+            my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
+            push @eclipse_candidates, {
+                nm           => $nm,
+                number       => $eclipse_num,
+                color        => $color,
+                label        => $label,
+                plotted      => 0,
+                central_line => undef,
+            };
         } else {
-            $out->insert('end', "$line\n");
+            $partial_count++;
         }
     }
-    $out->insert('end', "\n");
-    $out->see('end');
 
     # Build checkbox list
     for my $ec (@eclipse_candidates) {
@@ -763,12 +735,11 @@ sub _draw_eclipse_path_gd {
     }
 }
 
-# ── Save Text ─────────────────────────────────────────────
+# ── Save Eclipse List ─────────────────────────────────────
 
-sub save_text {
-    my @plotted = grep { $_->{plotted} && $_->{central_line} } @eclipse_candidates;
-    unless (@plotted) {
-        $status_msg = "No eclipse data to save.";
+sub save_eclipse_list {
+    unless (@eclipse_candidates) {
+        $status_msg = "No eclipses to save.";
         return;
     }
 
@@ -783,23 +754,18 @@ sub save_text {
         return;
     };
 
-    print $fh "Saros $VERSION - Solar Eclipse Report\n\n";
+    printf $fh "Saros %s - Eclipse List (%s to %s)\n\n", $VERSION, $from_year, $to_year;
+    printf $fh "%4s  %-12s  %s\n", '#', 'Date', 'Plotted';
+    printf $fh "%s\n", '-' x 28;
 
-    for my $ec (@plotted) {
-        printf $fh "Eclipse #%d: %s\n", $ec->{number}, $ec->{label};
-        printf $fh "%-8s  %8s  %8s\n", "Time(UT)", "Lon", "Lat";
-        printf $fh "%s\n", "-" x 30;
-
-        for my $pt (@{$ec->{central_line}}) {
-            next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
-            printf $fh "%-8s  %+8.3f  %+8.3f\n",
-                $pt->{h_m_time}, $pt->{geo_lon}, $pt->{geo_lat};
-        }
-        print $fh "\n";
+    for my $ec (@eclipse_candidates) {
+        printf $fh "%4d  %-12s  %s\n",
+            $ec->{number}, $ec->{label},
+            $ec->{plotted} ? '*' : '';
     }
 
     close $fh;
-    $status_msg = "Saved " . scalar(@plotted) . " eclipse(s): $file";
+    $status_msg = "Saved: $file";
 }
 
 # ── About ─────────────────────────────────────────────────
