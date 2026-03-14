@@ -29,18 +29,18 @@ my $HAS_GD   = eval { require GD; 1 }       // 0;
 # ── Color palette for eclipse paths ──────────────────────
 
 my @PATH_COLORS = (
-    '#ff0000',  # red
-    '#00ff00',  # green
-    '#ffff00',  # yellow
-    '#00ffff',  # cyan
+    '#ff0033',  # neon red
     '#ff00ff',  # magenta
-    '#ff8800',  # orange
-    '#00ff88',  # spring green
-    '#8800ff',  # violet
-    '#ff0088',  # hot pink
-    '#00bbff',  # sky blue
-    '#88ff00',  # chartreuse
     '#ffffff',  # white
+    '#ff6600',  # neon orange
+    '#cc00ff',  # purple
+    '#ffff00',  # neon yellow
+    '#ff0099',  # hot pink
+    '#00ff66',  # neon green
+    '#3300ff',  # electric blue
+    '#ff3399',  # rose
+    '#9900ff',  # violet
+    '#00ffcc',  # neon mint
 );
 
 # ── State ─────────────────────────────────────────────────
@@ -473,8 +473,11 @@ sub _draw_eclipse_path {
         push @line_pts, $x, $y;
     }
 
-    # Draw connecting line
+    # Draw black outline then colored line on top
     if (@line_pts >= 4) {
+        $c->createLine(@line_pts,
+            -fill => '#000000', -width => 4,
+            -smooth => 1, -tags => 'eclipse');
         $c->createLine(@line_pts,
             -fill => $color, -width => 2,
             -smooth => 1, -tags => 'eclipse');
@@ -483,16 +486,13 @@ sub _draw_eclipse_path {
     # Draw dots on top
     for (my $i = 0; $i < @line_pts; $i += 2) {
         my ($x, $y) = ($line_pts[$i], $line_pts[$i+1]);
-        my $r = 2;
-        $c->createOval($x-$r, $y-$r, $x+$r, $y+$r,
-            -fill => $color, -outline => '', -tags => 'eclipse');
+        $c->createOval($x-3, $y-3, $x+3, $y+3,
+            -fill => $color, -outline => '#000000', -tags => 'eclipse');
     }
 
-    # Place number label at start of path
+    # Number badge at end of eclipse path
     if (@line_pts >= 2) {
-        $c->createText($line_pts[0] - 2, $line_pts[1] - 8,
-            -text => "$num", -fill => $color,
-            -font => ['sans', 7, 'bold'], -anchor => 'e', -tags => 'eclipse');
+        _draw_number_badge($c, $line_pts[-2], $line_pts[-1], $num, $color);
     }
 
     # Draw subsolar track if enabled
@@ -506,15 +506,27 @@ sub _draw_eclipse_path {
         }
         if (@sun_pts >= 4) {
             $c->createLine(@sun_pts,
+                -fill => '#000000', -width => 4, -dash => [4, 3],
+                -tags => 'eclipse');
+            $c->createLine(@sun_pts,
                 -fill => $color, -width => 2, -dash => [4, 3],
                 -tags => 'eclipse');
         }
+        # Number badge at end of sun path
         if (@sun_pts >= 2) {
-            $c->createText($sun_pts[0] - 2, $sun_pts[1] + 10,
-                -text => "$num", -fill => $color,
-                -font => ['sans', 6], -anchor => 'e', -tags => 'eclipse');
+            _draw_number_badge($c, $sun_pts[-2], $sun_pts[-1], $num, $color);
         }
     }
+}
+
+sub _draw_number_badge {
+    my ($c, $x, $y, $num, $color) = @_;
+    my $r = length("$num") > 1 ? 8 : 7;
+    $c->createOval($x - $r, $y - $r, $x + $r, $y + $r,
+        -fill => $color, -outline => '#000000', -width => 1, -tags => 'eclipse');
+    $c->createText($x, $y,
+        -text => "$num", -fill => '#000000',
+        -font => ['sans', 7, 'bold'], -anchor => 'center', -tags => 'eclipse');
 }
 
 # ── Projection Builder ────────────────────────────────────
@@ -696,21 +708,28 @@ sub _draw_eclipse_path_gd {
         push @pts, [$x, $y];
     }
 
-    # Draw line segments
+    my $black = $img->colorResolve(0, 0, 0);
+
+    # Draw black outline then colored line
     for my $i (1 .. $#pts) {
+        $img->setThickness(4);
+        $img->line($pts[$i-1][0], $pts[$i-1][1],
+                   $pts[$i][0],   $pts[$i][1], $black);
+        $img->setThickness(2);
         $img->line($pts[$i-1][0], $pts[$i-1][1],
                    $pts[$i][0],   $pts[$i][1], $color);
     }
+    $img->setThickness(1);
 
     # Draw dots
     for my $pt (@pts) {
+        $img->filledArc($pt->[0], $pt->[1], 7, 7, 0, 360, $black);
         $img->filledArc($pt->[0], $pt->[1], 5, 5, 0, 360, $color);
     }
 
-    # Number label at start of path
+    # Number badge at end of eclipse path
     if (@pts) {
-        $img->string(GD::gdSmallFont(), $pts[0][0] - 10, $pts[0][1] - 14,
-            "$num", $color);
+        _draw_number_badge_gd($img, $pts[-1][0], $pts[-1][1], $num, $color, $black);
     }
 
     # Subsolar track
@@ -722,17 +741,33 @@ sub _draw_eclipse_path_gd {
             next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
             push @spts, [$x, $y];
         }
-        # Dashed line: draw every other segment
+        # Dashed line with black outline: draw every other segment
         for my $i (1 .. $#spts) {
             next if $i % 2 == 0;
+            $img->setThickness(4);
+            $img->line($spts[$i-1][0], $spts[$i-1][1],
+                       $spts[$i][0],   $spts[$i][1], $black);
+            $img->setThickness(2);
             $img->line($spts[$i-1][0], $spts[$i-1][1],
                        $spts[$i][0],   $spts[$i][1], $color);
         }
+        $img->setThickness(1);
+        # Number badge at end of sun path
         if (@spts) {
-            $img->string(GD::gdTinyFont(), $spts[0][0] - 8, $spts[0][1] + 4,
-                "$num", $color);
+            _draw_number_badge_gd($img, $spts[-1][0], $spts[-1][1], $num, $color, $black);
         }
     }
+}
+
+sub _draw_number_badge_gd {
+    my ($img, $x, $y, $num, $color, $black) = @_;
+    my $r = length("$num") > 1 ? 10 : 8;
+    $img->filledArc($x, $y, $r*2, $r*2, 0, 360, $color);
+    $img->arc($x, $y, $r*2, $r*2, 0, 360, $black);
+    my $font = GD::gdSmallFont();
+    my $tw = $font->width * length("$num");
+    my $th = $font->height;
+    $img->string($font, $x - int($tw/2), $y - int($th/2), "$num", $black);
 }
 
 # ── Save Eclipse List ─────────────────────────────────────
