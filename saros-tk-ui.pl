@@ -255,23 +255,32 @@ sub do_calculate {
     $out->insert('end', $hdr);
 
     my $eclipse_num = 0;
+    my $partial_count = 0;
     for my $nm (@$all) {
         my $date = sprintf("%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year});
         my $line = sprintf "  %-12s %9.5f % 9.5f",
             $date, $nm->{hour}, $nm->{beta};
         if ($nm->{eclipse_possible}) {
-            $out->insert('end', "$line  << eclipse\n");
-            $eclipse_num++;
-            my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
-            my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
-            push @eclipse_candidates, {
-                nm           => $nm,
-                number       => $eclipse_num,
-                color        => $color,
-                label        => $label,
-                plotted      => 0,
-                central_line => undef,  # computed on demand
-            };
+            # Quick check: skip partial-only eclipses
+            $status_msg = "Checking $date...";
+            $mw->update;
+            if ($engine->has_central_line($nm)) {
+                $eclipse_num++;
+                $out->insert('end', "$line  << central eclipse\n");
+                my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
+                my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
+                push @eclipse_candidates, {
+                    nm           => $nm,
+                    number       => $eclipse_num,
+                    color        => $color,
+                    label        => $label,
+                    plotted      => 0,
+                    central_line => undef,  # computed on demand
+                };
+            } else {
+                $partial_count++;
+                $out->insert('end', "$line  (partial only)\n");
+            }
         } else {
             $out->insert('end', "$line\n");
         }
@@ -304,36 +313,17 @@ sub do_calculate {
     draw_map_background();
 
     my $n = scalar @eclipse_candidates;
-    $status_msg = "$n eclipse candidate(s) found. " .
+    $status_msg = "$n central eclipse(s) found" .
+        ($partial_count ? ", $partial_count partial-only skipped. " : ". ") .
         ($n ? "Check boxes to plot paths." : "");
 }
 
 sub on_checkbox_toggle {
     my ($ec) = @_;
     if ($ec->{plotted} && !$ec->{central_line}) {
-        # Compute central line on first check
         $status_msg = "Computing central line for #$ec->{number} $ec->{label}...";
         $mw->update;
-        my $line = $engine->calculate_central_line($ec->{nm});
-        $ec->{central_line} = $line;
-
-        # Print to text output
-        $out->insert('end',
-            "\tCentral Line #$ec->{number}: $ec->{label}\n" .
-            "\t" . ("=" x 44) . "\n\n");
-        my $hdr = sprintf "  %-12s  %-5s  %-12s  %8s %8s\n",
-            'Date', 'UT', 'Phase', 'Lon', 'Lat';
-        $out->insert('end', $hdr);
-        for my $pt (@$line) {
-            my $lon_str = defined($pt->{geo_lon}) ? sprintf("% 8.3f", $pt->{geo_lon}) : '     ---';
-            my $lat_str = defined($pt->{geo_lat}) ? sprintf("% 8.3f", $pt->{geo_lat}) : '     ---';
-            my $date = sprintf("%d.%d.%d", $pt->{day}, $pt->{month}, $pt->{year});
-            my $row = sprintf "  %-12s  %-5s  %-12s  %s %s\n",
-                $date, $pt->{h_m_time}, $pt->{phase}, $lon_str, $lat_str;
-            $out->insert('end', $row);
-        }
-        $out->insert('end', "\n");
-        $out->see('end');
+        $ec->{central_line} = $engine->calculate_central_line($ec->{nm});
     }
     redraw_map();
 }

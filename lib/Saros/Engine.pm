@@ -353,6 +353,32 @@ sub calculate_central_line {
     return \@results;
 }
 
+# Quick check: does this eclipse have any central line points?
+# Uses coarser time steps and returns as soon as one is found.
+sub has_central_line {
+    my ($self, $nm_data) = @_;
+    my $tNM = $nm_data->{tNM};
+
+    my $r_M = 1738;
+    my $r_S = 696000;
+    my $qday = 0.25 / 36525;
+    my $dt = 15 / (60 * 24 * 36525);  # 15 min steps (3x coarser)
+
+    for (my $t = $tNM - $qday; $t <= $tNM + $qday; $t += $dt) {
+        my (undef, undef, $sun_xyz)  = sun_position($t);
+        my (undef, undef, $moon_xyz) = moon_position($t);
+
+        my $m = $moon_xyz;
+        my @d = ($m->[0] - $sun_xyz->[0], $m->[1] - $sun_xyz->[1], $m->[2] - $sun_xyz->[2]);
+        my $dist = sqrt($d[0]**2 + $d[1]**2 + $d[2]**2);
+        my @e = map { $_ / $dist } @d;
+
+        my $hit = $self->_ray_earth_intersect($m, \@e);
+        return 1 if $hit;
+    }
+    return 0;
+}
+
 1;
 
 __END__
