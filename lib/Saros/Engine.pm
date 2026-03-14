@@ -379,6 +379,33 @@ sub has_central_line {
     return 0;
 }
 
+# Calculate the subsolar point track during an eclipse window.
+# The subsolar point is where the Sun is directly overhead on Earth.
+# Returns arrayref of { geo_lon, geo_lat } hashrefs.
+sub calculate_subsolar_track {
+    my ($self, $nm_data) = @_;
+    my $tNM = $nm_data->{tNM};
+    my @results;
+
+    my $qday = 0.25 / 36525;
+    my $dt = 5 / (60 * 24 * 36525);  # 5 min steps
+
+    for (my $t = $tNM - $qday; $t <= $tNM + $qday; $t += $dt) {
+        my (undef, undef, $sun_xyz) = sun_position($t);
+
+        # Subsolar point: where the Earth-Sun line hits the surface
+        my ($sx, $sy, $sz) = @$sun_xyz;
+        my $alpha = atan2($sy, $sx);  # right ascension
+        my $r_xy = sqrt($sx*$sx + $sy*$sy);
+        my $delta = atan2($sz, $r_xy);  # declination
+
+        my ($geo_lon, $geo_lat) = equatorial_to_geographic($alpha, $delta, $t);
+        push @results, { geo_lon => $geo_lon, geo_lat => $geo_lat };
+    }
+
+    return \@results;
+}
+
 1;
 
 __END__

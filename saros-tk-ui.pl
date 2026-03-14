@@ -48,12 +48,14 @@ my @PATH_COLORS = (
 
 my $engine = Saros::Engine->new(use_delta_t => 1, earth_model => 'wgs84');
 my $projection_type = 'mercator';
-my ($from_year, $to_year);
+my $current_year = (localtime)[5] + 1900;
+my ($from_year, $to_year) = ($current_year, $current_year + 1);
 my @eclipse_candidates;     # { nm => ..., number => N, color => ..., plotted => 0|1, central_line => [...] }
 my $map_photo;              # keep Tk Photo alive for canvas
 my $status_msg = "Enter a year range and click Calculate.";
 my $dt_var = 1;
 my $earth_model = 'wgs84';
+my $show_sun_path = 0;
 
 # Map extent overrides (empty = use defaults)
 my %extent = (
@@ -138,6 +140,10 @@ $input_f->Optionmenu(
     -command  => sub { _rebuild_engine() },
 )->pack(-side => 'left', -padx => 6, -pady => 8);
 
+$input_f->Checkbutton(-text => "Sun path", -variable => \$show_sun_path,
+    -command => \&redraw_map)
+    ->pack(-side => 'left', -padx => 6, -pady => 8);
+
 # -- Row 1: Main area (eclipse list + map)
 my $main_f = $mw->Frame;
 $main_f->grid('-', -sticky => 'nsew', -padx => 0, -pady => 0);
@@ -207,7 +213,10 @@ $mw->gridColumnconfigure(0, -weight => 1);
 
 # ── Initialize map ────────────────────────────────────────
 
+# ── Initialize: draw map and calculate default range ──────
+
 draw_map_background();
+do_calculate();
 
 # ── Run ───────────────────────────────────────────────────
 
@@ -324,6 +333,7 @@ sub on_checkbox_toggle {
         $status_msg = "Computing central line for #$ec->{number} $ec->{label}...";
         $mw->update;
         $ec->{central_line} = $engine->calculate_central_line($ec->{nm});
+        $ec->{sun_track} = $engine->calculate_subsolar_track($ec->{nm});
     }
     redraw_map();
 }
@@ -511,6 +521,27 @@ sub _draw_eclipse_path {
         $c->createText($line_pts[0] - 2, $line_pts[1] - 8,
             -text => "$num", -fill => $color,
             -font => ['sans', 7, 'bold'], -anchor => 'e', -tags => 'eclipse');
+    }
+
+    # Draw subsolar track if enabled
+    if ($show_sun_path && $ec->{sun_track}) {
+        my @sun_pts;
+        for my $pt (@{$ec->{sun_track}}) {
+            my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+            next unless defined $x && defined $y;
+            next if $x < 0 || $x > $map_img_w || $y < 0 || $y > $map_img_h;
+            push @sun_pts, $x, $y;
+        }
+        if (@sun_pts >= 4) {
+            $c->createLine(@sun_pts,
+                -fill => $color, -width => 1, -dash => [4, 3],
+                -tags => 'eclipse');
+        }
+        if (@sun_pts >= 2) {
+            $c->createText($sun_pts[0] - 2, $sun_pts[1] + 10,
+                -text => "$num", -fill => $color,
+                -font => ['sans', 6], -anchor => 'e', -tags => 'eclipse');
+        }
     }
 }
 
@@ -708,6 +739,27 @@ sub _draw_eclipse_path_gd {
     if (@pts) {
         $img->string(GD::gdSmallFont(), $pts[0][0] - 10, $pts[0][1] - 14,
             "$num", $color);
+    }
+
+    # Subsolar track
+    if ($show_sun_path && $ec->{sun_track}) {
+        my @spts;
+        for my $pt (@{$ec->{sun_track}}) {
+            my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+            next unless defined $x && defined $y;
+            next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
+            push @spts, [$x, $y];
+        }
+        # Dashed line: draw every other segment
+        for my $i (1 .. $#spts) {
+            next if $i % 2 == 0;
+            $img->line($spts[$i-1][0], $spts[$i-1][1],
+                       $spts[$i][0],   $spts[$i][1], $color);
+        }
+        if (@spts) {
+            $img->string(GD::gdTinyFont(), $spts[0][0] - 8, $spts[0][1] + 4,
+                "$num", $color);
+        }
     }
 }
 
