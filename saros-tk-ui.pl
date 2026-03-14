@@ -542,7 +542,7 @@ sub _draw_eclipse_badges {
 
     # Badge at start of eclipse central line
     my @line = @{$ec->{central_line}};
-    for my $pt (@line) {
+    for my $pt (reverse @line) {
         next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
         my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
         next unless defined $x && defined $y;
@@ -553,7 +553,7 @@ sub _draw_eclipse_badges {
 
     # Badge at start of sun path
     if ($show_sun_path && $ec->{sun_track}) {
-        for my $pt (@{$ec->{sun_track}}) {
+        for my $pt (reverse @{$ec->{sun_track}}) {
             my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
             next unless defined $x && defined $y;
             next if $x < 0 || $x > $map_img_w || $y < 0 || $y > $map_img_h;
@@ -809,7 +809,7 @@ sub _draw_eclipse_badges_gd {
     my $num   = $ec->{number};
 
     # Badge at start of eclipse central line
-    for my $pt (@{$ec->{central_line}}) {
+    for my $pt (reverse @{$ec->{central_line}}) {
         next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
         my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
         next unless defined $x && defined $y;
@@ -820,7 +820,7 @@ sub _draw_eclipse_badges_gd {
 
     # Badge at start of sun path
     if ($show_sun_path && $ec->{sun_track}) {
-        for my $pt (@{$ec->{sun_track}}) {
+        for my $pt (reverse @{$ec->{sun_track}}) {
             my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
             next unless defined $x && defined $y;
             next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
