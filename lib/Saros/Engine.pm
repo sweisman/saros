@@ -419,7 +419,16 @@ sub calculate_subsolar_track {
     my $start = $tNM - $qday + $first_step * $dt;
     my $end   = $tNM - $qday + $last_step * $dt;
 
-    for (my $t = $start; $t <= $end; $t += $dt) {
+    # Use finer steps for short-duration eclipses (target at least 30 points)
+    my $duration = $end - $start;
+    my $track_dt = $dt;
+    if ($duration > 0) {
+        my $min_points = 30;
+        my $fine_dt = $duration / $min_points;
+        $track_dt = $fine_dt if $fine_dt < $dt;
+    }
+
+    for (my $t = $start; $t <= $end; $t += $track_dt) {
         my (undef, undef, $sun_xyz) = sun_position($t);
         my ($sx, $sy, $sz) = @$sun_xyz;
         my $alpha = atan2($sy, $sx);
