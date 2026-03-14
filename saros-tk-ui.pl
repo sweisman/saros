@@ -455,6 +455,12 @@ sub redraw_map {
         $plotted++;
     }
 
+    # Draw all number badges last so they're on top
+    for my $ec (@eclipse_candidates) {
+        next unless $ec->{plotted} && $ec->{central_line};
+        _draw_eclipse_badges($c, $proj, $ec);
+    }
+
     $status_msg = "$plotted eclipse path(s) plotted." if $plotted;
 }
 
@@ -490,11 +496,6 @@ sub _draw_eclipse_path {
             -fill => $color, -outline => '#000000', -tags => 'eclipse');
     }
 
-    # Number badge at end of eclipse path
-    if (@line_pts >= 2) {
-        _draw_number_badge($c, $line_pts[-2], $line_pts[-1], $num, $color);
-    }
-
     # Draw subsolar track if enabled
     if ($show_sun_path && $ec->{sun_track}) {
         my @sun_pts;
@@ -512,10 +513,6 @@ sub _draw_eclipse_path {
                 -fill => $color, -width => 2, -dash => [4, 3],
                 -tags => 'eclipse');
         }
-        # Number badge at end of sun path
-        if (@sun_pts >= 2) {
-            _draw_number_badge($c, $sun_pts[-2], $sun_pts[-1], $num, $color);
-        }
     }
 }
 
@@ -527,6 +524,35 @@ sub _draw_number_badge {
     $c->createText($x, $y,
         -text => "$num", -fill => '#000000',
         -font => ['sans', 7, 'bold'], -anchor => 'center', -tags => 'eclipse');
+}
+
+# Draw number badges at START of eclipse path and sun path (called in final pass)
+sub _draw_eclipse_badges {
+    my ($c, $proj, $ec) = @_;
+    my $num   = $ec->{number};
+    my $color = $ec->{color};
+
+    # Badge at start of eclipse central line
+    my @line = @{$ec->{central_line}};
+    for my $pt (@line) {
+        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+        my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+        next unless defined $x && defined $y;
+        next if $x < 0 || $x > $map_img_w || $y < 0 || $y > $map_img_h;
+        _draw_number_badge($c, $x, $y, $num, $color);
+        last;
+    }
+
+    # Badge at start of sun path
+    if ($show_sun_path && $ec->{sun_track}) {
+        for my $pt (@{$ec->{sun_track}}) {
+            my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+            next unless defined $x && defined $y;
+            next if $x < 0 || $x > $map_img_w || $y < 0 || $y > $map_img_h;
+            _draw_number_badge($c, $x, $y, $num, $color);
+            last;
+        }
+    }
 }
 
 # ── Projection Builder ────────────────────────────────────
@@ -676,6 +702,11 @@ sub save_image {
         _draw_eclipse_path_gd($img, $img_w, $img_h, $proj, $ec);
     }
 
+    # Draw all number badges last so they're on top, at START of paths
+    for my $ec (@plotted) {
+        _draw_eclipse_badges_gd($img, $img_w, $img_h, $proj, $ec);
+    }
+
     open my $fh, '>', $file or do {
         $status_msg = "Cannot save $file: $!";
         return;
@@ -727,11 +758,6 @@ sub _draw_eclipse_path_gd {
         $img->filledArc($pt->[0], $pt->[1], 5, 5, 0, 360, $color);
     }
 
-    # Number badge at end of eclipse path
-    if (@pts) {
-        _draw_number_badge_gd($img, $pts[-1][0], $pts[-1][1], $num, $color, $black);
-    }
-
     # Subsolar track
     if ($show_sun_path && $ec->{sun_track}) {
         my @spts;
@@ -752,10 +778,6 @@ sub _draw_eclipse_path_gd {
                        $spts[$i][0],   $spts[$i][1], $color);
         }
         $img->setThickness(1);
-        # Number badge at end of sun path
-        if (@spts) {
-            _draw_number_badge_gd($img, $spts[-1][0], $spts[-1][1], $num, $color, $black);
-        }
     }
 }
 
@@ -768,6 +790,36 @@ sub _draw_number_badge_gd {
     my $tw = $font->width * length("$num");
     my $th = $font->height;
     $img->string($font, $x - int($tw/2), $y - int($th/2), "$num", $black);
+}
+
+# Draw number badges at START of eclipse path and sun path (GD, called in final pass)
+sub _draw_eclipse_badges_gd {
+    my ($img, $img_w, $img_h, $proj, $ec) = @_;
+    my @rgb   = _hex_to_rgb($ec->{color});
+    my $color = $img->colorResolve(@rgb);
+    my $black = $img->colorResolve(0, 0, 0);
+    my $num   = $ec->{number};
+
+    # Badge at start of eclipse central line
+    for my $pt (@{$ec->{central_line}}) {
+        next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
+        my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+        next unless defined $x && defined $y;
+        next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
+        _draw_number_badge_gd($img, $x, $y, $num, $color, $black);
+        last;
+    }
+
+    # Badge at start of sun path
+    if ($show_sun_path && $ec->{sun_track}) {
+        for my $pt (@{$ec->{sun_track}}) {
+            my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
+            next unless defined $x && defined $y;
+            next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;
+            _draw_number_badge_gd($img, $x, $y, $num, $color, $black);
+            last;
+        }
+    }
 }
 
 # ── Save Eclipse List ─────────────────────────────────────
