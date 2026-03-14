@@ -379,26 +379,52 @@ sub has_central_line {
     return 0;
 }
 
-# Calculate the subsolar point track during an eclipse window.
+# Calculate the subsolar point track spanning the central line period.
 # The subsolar point is where the Sun is directly overhead on Earth.
+# Args: $nm_data, $central_line (arrayref from calculate_central_line)
 # Returns arrayref of { geo_lon, geo_lat } hashrefs.
 sub calculate_subsolar_track {
-    my ($self, $nm_data) = @_;
+    my ($self, $nm_data, $central_line) = @_;
     my $tNM = $nm_data->{tNM};
     my @results;
 
+    # Determine time span from central line points
+    my @central = grep { $_->{phase} eq 'central' } @$central_line;
+    return \@results unless @central;
+
+    # Find first and last central point indices to get time range
     my $qday = 0.25 / 36525;
     my $dt = 5 / (60 * 24 * 36525);  # 5 min steps
+    my $n_steps = int(2 * $qday / $dt);
 
+    # Count which steps are central (matching the central line loop)
+    my ($first_step, $last_step);
+    my $step = 0;
     for (my $t = $tNM - $qday; $t <= $tNM + $qday; $t += $dt) {
+        my (undef, undef, $sun_xyz)  = sun_position($t);
+        my (undef, undef, $moon_xyz) = moon_position($t);
+        my $m = $moon_xyz;
+        my @d = ($m->[0] - $sun_xyz->[0], $m->[1] - $sun_xyz->[1], $m->[2] - $sun_xyz->[2]);
+        my $dist = sqrt($d[0]**2 + $d[1]**2 + $d[2]**2);
+        my @e = map { $_ / $dist } @d;
+        if ($self->_ray_earth_intersect($m, \@e)) {
+            $first_step //= $step;
+            $last_step = $step;
+        }
+        $step++;
+    }
+    return \@results unless defined $first_step;
+
+    # Compute subsolar track for that time range
+    my $start = $tNM - $qday + $first_step * $dt;
+    my $end   = $tNM - $qday + $last_step * $dt;
+
+    for (my $t = $start; $t <= $end; $t += $dt) {
         my (undef, undef, $sun_xyz) = sun_position($t);
-
-        # Subsolar point: where the Earth-Sun line hits the surface
         my ($sx, $sy, $sz) = @$sun_xyz;
-        my $alpha = atan2($sy, $sx);  # right ascension
+        my $alpha = atan2($sy, $sx);
         my $r_xy = sqrt($sx*$sx + $sy*$sy);
-        my $delta = atan2($sz, $r_xy);  # declination
-
+        my $delta = atan2($sz, $r_xy);
         my ($geo_lon, $geo_lat) = equatorial_to_geographic($alpha, $delta, $t);
         push @results, { geo_lon => $geo_lon, geo_lat => $geo_lat };
     }

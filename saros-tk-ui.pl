@@ -333,7 +333,7 @@ sub on_checkbox_toggle {
         $status_msg = "Computing central line for #$ec->{number} $ec->{label}...";
         $mw->update;
         $ec->{central_line} = $engine->calculate_central_line($ec->{nm});
-        $ec->{sun_track} = $engine->calculate_subsolar_track($ec->{nm});
+        $ec->{sun_track} = $engine->calculate_subsolar_track($ec->{nm}, $ec->{central_line});
     }
     redraw_map();
 }
@@ -534,7 +534,7 @@ sub _draw_eclipse_path {
         }
         if (@sun_pts >= 4) {
             $c->createLine(@sun_pts,
-                -fill => $color, -width => 1, -dash => [4, 3],
+                -fill => $color, -width => 2, -dash => [4, 3],
                 -tags => 'eclipse');
         }
         if (@sun_pts >= 2) {
