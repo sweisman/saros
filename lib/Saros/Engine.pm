@@ -246,6 +246,30 @@ sub calculate_central_line {
     my $start = $tNM - $qday;
     my $end   = $tNM + $qday;
 
+    # Coarse pass to find the central window, then refine step size
+    my ($first_central_t, $last_central_t);
+    for (my $t = $start; $t <= $end; $t += $dt) {
+        my (undef, undef, $sun_xyz)  = sun_position($t);
+        my (undef, undef, $moon_xyz) = moon_position($t);
+        my $m = $moon_xyz;
+        my @d = ($m->[0] - $sun_xyz->[0], $m->[1] - $sun_xyz->[1], $m->[2] - $sun_xyz->[2]);
+        my $dist = sqrt($d[0]**2 + $d[1]**2 + $d[2]**2);
+        my @e = map { $_ / $dist } @d;
+        if ($self->_ray_earth_intersect($m, \@e)) {
+            $first_central_t //= $t;
+            $last_central_t = $t;
+        }
+    }
+
+    # Use finer steps for short-duration eclipses (target at least 30 central points)
+    if (defined $first_central_t) {
+        my $duration = $last_central_t - $first_central_t;
+        if ($duration > 0) {
+            my $fine_dt = $duration / 30;
+            $dt = $fine_dt if $fine_dt < $dt;
+        }
+    }
+
     for (my $t = $start; $t <= $end; $t += $dt) {
         my (undef, undef, $sun_xyz)  = sun_position($t);
         my (undef, undef, $moon_xyz) = moon_position($t);
