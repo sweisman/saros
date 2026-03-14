@@ -291,6 +291,12 @@ sub do_calculate {
         $ec->{_cb} = $cb;  # keep reference for select_all/deselect_all
     }
 
+    # Clear any cached computation from previous runs
+    for my $ec (@eclipse_candidates) {
+        $ec->{central_line} = undef;
+        $ec->{sun_track} = undef;
+    }
+
     draw_map_background();
 
     my $n = scalar @eclipse_candidates;
