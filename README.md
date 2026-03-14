@@ -199,7 +199,7 @@ diff wgs84.txt sphere.txt
 | `--map-fmt png\|jpg` | Output image format | `png` |
 | `--width N` | Canvas width when no `--map-bg` | 800 (merc) / 600 (az) |
 | `--height N` | Canvas height when no `--map-bg` | 400 (merc) / 600 (az) |
-| `--projection TYPE` | `mercator` or `azimuthal_equidistant` | `mercator` |
+| `--projection TYPE` | `mercator` or `azimuthal_equidistant` | `mercator` (CLI) |
 | `--extent-west DEG` | Western longitude bound | -180 |
 | `--extent-east DEG` | Eastern longitude bound | 180 |
 | `--extent-north DEG` | Northern latitude bound | 80 |
@@ -220,7 +220,7 @@ When `--map-bg` is provided, image dimensions are read from the file. When it is
 perl saros-tk-ui.pl
 ```
 
-The GUI launches maximized and auto-calculates eclipses for the current year and next year on startup. Only eclipses with a central line (total or annular) are listed; partial-only eclipses are filtered out.
+The GUI launches maximized in azimuthal equidistant projection (Gleason map) by default and auto-calculates eclipses for the current year and next year on startup. Only eclipses with a central line (total or annular) are listed; partial-only eclipses are filtered out.
 
 - **Top bar** - Year range input, Calculate button, ΔT checkbox, Earth model selector, Sun path toggle.
 - **Left panel** - Scrollable checkbox list of central eclipses, each with a numbered color swatch. Check individual eclipses or use All/None buttons to plot paths on the map. Central lines are computed on demand when an eclipse is first checked.

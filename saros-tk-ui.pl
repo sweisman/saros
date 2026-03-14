@@ -46,7 +46,7 @@ my @PATH_COLORS = (
 # ── State ─────────────────────────────────────────────────
 
 my $engine = Saros::Engine->new(use_delta_t => 1, earth_model => 'wgs84');
-my $projection_type = 'mercator';
+my $projection_type = 'azimuthal_equidistant';
 my $current_year = (localtime)[5] + 1900;
 my ($from_year, $to_year) = ($current_year, $current_year + 1);
 my @eclipse_candidates;     # { nm => ..., number => N, color => ..., plotted => 0|1, central_line => [...] }
