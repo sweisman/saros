@@ -359,23 +359,25 @@ sub _load_map_image {
     $native_img_w ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 540;
     $native_img_h ||= ($projection_type eq 'azimuthal_equidistant') ? 600 : 420;
 
-    # Scale to fit viewport
-    $mw->update;  # ensure geometry is current
-    my $vp_w = $map_canvas_inner->width  || 500;
-    my $vp_h = $map_canvas_inner->height || 400;
-    my $scale_x = $vp_w / $native_img_w;
-    my $scale_y = $vp_h / $native_img_h;
-    my $scale = ($scale_x < $scale_y) ? $scale_x : $scale_y;
-    $scale = 1.0 if $scale > 1.0;  # don't upscale
+    # AE map: render at full native size, allow scrolling
+    # Mercator: scale to fit viewport
+    my $scale = 1.0;
+    if ($projection_type ne 'azimuthal_equidistant') {
+        $mw->update;  # ensure geometry is current
+        my $vp_w = $map_canvas_inner->width  || 500;
+        my $vp_h = $map_canvas_inner->height || 400;
+        my $scale_x = $vp_w / $native_img_w;
+        my $scale_y = $vp_h / $native_img_h;
+        $scale = ($scale_x < $scale_y) ? $scale_x : $scale_y;
+        $scale = 1.0 if $scale > 1.0;  # don't upscale
+    }
 
     $map_img_w = int($native_img_w * $scale);
     $map_img_h = int($native_img_h * $scale);
 
-    # Create scaled display photo
+    # Create scaled display photo if needed
     if ($map_photo && $scale < 1.0) {
         $map_display_photo = $mw->Photo;
-        # Tk Photo subsample: integer factor only, use nearest
-        # For arbitrary scale, copy to a sized photo
         $map_display_photo->copy($map_photo,
             -subsample => int(1 / $scale + 0.5), int(1 / $scale + 0.5));
         $map_img_w = $map_display_photo->width;

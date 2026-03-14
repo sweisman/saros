@@ -224,7 +224,7 @@ The GUI launches maximized in azimuthal equidistant projection (Gleason map) by 
 
 - **Top bar** - Year range input, Calculate button, ΔT checkbox, Earth model selector, Sun path toggle.
 - **Left panel** - Scrollable checkbox list of central eclipses, each with a numbered color swatch. Check individual eclipses or use All/None buttons to plot paths on the map. Central lines are computed on demand when an eclipse is first checked.
-- **Map area** - Displays the selected map projection with eclipse paths overlaid. Paths are drawn with black outlines and vivid neon colors that cycle through a 12-color palette. Numbered badges appear at the start of each path, drawn in a final pass so they are never obscured by overlapping paths. The map rescales to fit the viewport on window resize.
+- **Map area** - Displays the selected map projection with eclipse paths overlaid. Paths are drawn with black outlines and vivid neon colors that cycle through a 12-color palette. Numbered badges appear at the start of each path, drawn in a final pass so they are never obscured by overlapping paths. The AE map renders at full native resolution with scrollbars; the Mercator map scales to fit the viewport on window resize.
 - **Sun path overlay** - When enabled, shows the subsolar track (where the Sun is directly overhead) during the period of centrality as a dashed line in the same color as the eclipse path.
 - **Status bar** - Current operation feedback.
 - **File menu** - Save Map Image as JPEG or PNG (requires `GD`; saves at full native resolution regardless of display scale), Save Eclipse List as numbered text file matching the image.
