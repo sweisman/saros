@@ -59,7 +59,7 @@ saros/
 ├── COPYING                     GNU GPL v3
 ├── saros-cli.pl                Command-line interface
 ├── saros-tk-ui.pl              Tk graphical interface
-├── gleason-ae.jpg              Default azimuthal equidistant map background
+├── azimuthal-map.jpg           Default azimuthal equidistant map background
 ├── lib/
 │   └── Saros/
 │       ├── Calendar.pm         Julian Day ↔ calendar date conversions
@@ -230,7 +230,7 @@ The GUI launches maximized in azimuthal equidistant projection (Gleason map) by 
 - **File menu** - Save Map Image as JPEG or PNG (requires `GD`; saves at full native resolution regardless of display scale), Save Eclipse List as numbered text file matching the image.
 - **Settings menu** - Projection type (Mercator / Azimuthal Equidistant), Map Extent dialog for configuring geographic bounds, projection center, angular radius, and per-projection image regions.
 
-A Gleason azimuthal equidistant map (`gleason-ae.jpg`) is included as the default AE background, pre-calibrated with image region and center values.
+An azimuthal equidistant map (`azimuthal-map.jpg`) is included as the default AE background, pre-calibrated with image region and center values.
 
 Map background images can be overridden via environment variables:
 

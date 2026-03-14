@@ -21,7 +21,7 @@ use Saros::Calendar qw(chopdigits);
 my $VERSION = "2.0";
 my $WORLDMAP = $ENV{SAROS_WORLDMAP}
     // "$RealBin/world.jpg";
-my $AZMAP = $ENV{SAROS_AZMAP} // "$RealBin/gleason-ae.jpg";
+my $AZMAP = $ENV{SAROS_AZMAP} // "$RealBin/azimuthal-map.jpg";
 
 my $HAS_JPEG = eval { require Tk::JPEG; 1 } // 0;
 my $HAS_GD   = eval { require GD; 1 }       // 0;
@@ -60,9 +60,9 @@ my $show_sun_path = 0;
 my %extent = (
     merc_west  => '', merc_east  => '',
     merc_north => '', merc_south => '',
-    az_center_lat => '90', az_center_lon => '-90',
-    az_radius     => '150',
-    az_img_x => '203', az_img_y => '491', az_img_w => '940', az_img_h => '940',
+    az_center_lat => '90', az_center_lon => '180',
+    az_radius     => '180',
+    az_img_x => '62', az_img_y => '402', az_img_w => '1116', az_img_h => '1116',
     merc_img_x => '', merc_img_y => '', merc_img_w => '', merc_img_h => '',
 );
 
