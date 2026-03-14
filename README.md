@@ -56,8 +56,10 @@ Both projections support an **image region** parameter - the pixel rectangle wit
 ```
 saros/
 ├── README.md
+├── COPYING                     GNU GPL v3
 ├── saros-cli.pl                Command-line interface
 ├── saros-tk-ui.pl              Tk graphical interface
+├── gleason-ae.jpg              Default azimuthal equidistant map background
 ├── lib/
 │   └── Saros/
 │       ├── Calendar.pm         Julian Day ↔ calendar date conversions
@@ -77,7 +79,7 @@ saros/
 
 **`Saros::Coordinates`** - Computes Sun and Moon positions as 3D Cartesian vectors in the equatorial frame. Provides the ecliptic-to-equatorial rotation and the equatorial-to-geographic conversion (right ascension and declination to longitude and latitude via Greenwich Sidereal Time).
 
-**`Saros::Engine`** - The main computation module. `find_new_moons()` scans a year range and returns all new moon dates with their ecliptic latitude β, flagging those where |β| < 1.58° as eclipse candidates. `calculate_central_line()` takes a candidate and steps through time in 5-minute increments, performing the full shadow geometry calculation at each step. Returns an array of points with phase, time, and geographic coordinates. Contains the ray-ellipsoid intersection and geodetic latitude conversion.
+**`Saros::Engine`** - The main computation module. `find_new_moons()` scans a year range and returns all new moon dates with their ecliptic latitude β, flagging those where |β| < 1.58° as eclipse candidates. `has_central_line()` performs a fast check with 15-minute coarse steps, returning true as soon as a central phase is found — used to filter out partial-only eclipses without full computation. `calculate_central_line()` takes a candidate and steps through time in 5-minute increments, performing the full shadow geometry calculation at each step. Returns an array of points with phase, time, and geographic coordinates. `calculate_subsolar_track()` computes the subsolar point (where the Sun is directly overhead) for the duration of centrality. Contains the ray-ellipsoid intersection and geodetic latitude conversion.
 
 **`Saros::Projection`** - Converts geographic coordinates (latitude, longitude) to pixel coordinates and back. Encapsulates the projection type, geographic extent, and image region. Both `project()` and `inverse()` are provided.
 
@@ -93,6 +95,11 @@ Saros::Engine::find_new_moons()
     │  returns array of new moon records
     │
     ▼
+Saros::Engine::has_central_line()
+    │  fast filter: 15-min coarse steps, returns true on first central hit
+    │  discards partial-only eclipses without full computation
+    │
+    ▼
 Saros::Engine::calculate_central_line()
     │  for a selected candidate:
     │  steps through ±6 hours in 5-min increments
@@ -102,6 +109,11 @@ Saros::Engine::calculate_central_line()
     │    ray-Earth intersection → ground point
     │    equatorial → geographic coordinate conversion
     │  returns array of {time, phase, lon, lat} records
+    │
+    ▼
+Saros::Engine::calculate_subsolar_track()  (optional)
+    │  computes where the Sun is directly overhead during centrality
+    │  returns array of {geo_lon, geo_lat} records
     │
     ▼
 Output layer (CLI text, CLI image, or Tk GUI)
@@ -208,16 +220,19 @@ When `--map-bg` is provided, image dimensions are read from the file. When it is
 perl saros-tk-ui.pl
 ```
 
-The GUI provides the same functionality through a Tk window:
+The GUI launches maximized and auto-calculates eclipses for the current year and next year on startup. Only eclipses with a central line (total or annular) are listed; partial-only eclipses are filtered out.
 
-- **Top bar** - Year range input, Calculate button, ΔT checkbox, Earth model selector.
-- **Left panel** - List of eclipse candidates. Click one to compute its central line.
-- **Right panel** - Scrollable text output showing new moon tables and central line data.
+- **Top bar** - Year range input, Calculate button, ΔT checkbox, Earth model selector, Sun path toggle.
+- **Left panel** - Scrollable checkbox list of central eclipses, each with a numbered color swatch. Check individual eclipses or use All/None buttons to plot paths on the map. Central lines are computed on demand when an eclipse is first checked.
+- **Map area** - Displays the selected map projection with eclipse paths overlaid. Paths are drawn with black outlines and vivid neon colors that cycle through a 12-color palette. Numbered badges appear at the start of each path, drawn in a final pass so they are never obscured by overlapping paths. The map rescales to fit the viewport on window resize.
+- **Sun path overlay** - When enabled, shows the subsolar track (where the Sun is directly overhead) during the period of centrality as a dashed line in the same color as the eclipse path.
 - **Status bar** - Current operation feedback.
-- **File menu** - Show central line on map (Ctrl+Z), save as image (JPEG/PNG), save report (text/PDF).
-- **Settings menu** - Projection type selection, Map Extent dialog for configuring geographic bounds and image region.
+- **File menu** - Save Map Image as JPEG or PNG (requires `GD`; saves at full native resolution regardless of display scale), Save Eclipse List as numbered text file matching the image.
+- **Settings menu** - Projection type (Mercator / Azimuthal Equidistant), Map Extent dialog for configuring geographic bounds, projection center, angular radius, and per-projection image regions.
 
-Map background images are set via environment variables:
+A Gleason azimuthal equidistant map (`gleason-ae.jpg`) is included as the default AE background, pre-calibrated with image region and center values.
+
+Map background images can be overridden via environment variables:
 
 ```bash
 export SAROS_WORLDMAP=/path/to/mercator_map.jpg
