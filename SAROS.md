@@ -32,6 +32,26 @@ When the Moon is slightly farther from Earth (smaller angular size than the Sun)
 
 A second, wider penumbral cone (tangent to both bodies but crossing between them) defines the region of partial eclipse.
 
+### Scale Invariance
+
+The cone geometry is scale-invariant — what matters is the *ratios* between the radii and distances, not the absolute values. You could scale everything down proportionally and get the same intersection on a proportionally smaller Earth. The shadow path width, the total/annular determination, the contact angles — all depend on angular sizes, which are ratios.
+
+This is essentially what Bessel realized. The "Besselian elements" abstract away the absolute distances and work with the shadow geometry projected onto a fundamental plane. The absolute km values are just one way to set up the ratios.
+
+This code computes the shadow cone in 3D Cartesian coordinates using physical distances in kilometers — Sun at 149,600,000 km, Moon at 384,400 km, with radii of 696,000 km, 1,738 km, and 6,378 km respectively. The shadow axis is traced as a ray in km-space and intersected with the Earth ellipsoid. But the results are determined entirely by the proportions, not the scale.
+
+This is also why the fixed Moon distance is the most consequential simplification: the ratio of Moon radius to Moon distance determines the Moon's angular size, which varies by ~6% over an orbit. That ratio is what determines whether the umbral cone closes before or after it reaches the Earth's surface — total vs. annular.
+
+### A Note on Flat Earth
+
+Since the geometry depends only on ratios and intersections, the same cone math would work on any surface shape — including a flat disc — provided the Sun and Moon are positioned to reproduce the same angular sizes and motions as seen from the surface. The math doesn't care about the underlying cosmology; it cares about the geometry of the intersection.
+
+The difficulty is that making a flat earth model produce the correct angular sizes, motions, and parallax from every surface location simultaneously requires the Sun and Moon to behave in contrived ways that a spherical geometry gives you naturally. The globe model is simpler — the inputs are straightforward and the cone intersection just works.
+
+That said, this code already renders eclipse paths on an azimuthal equidistant map, which is a flat earth map. The paths look correct on it because the math is the math.
+
+**Speculative: firmament optics.** In a flat earth model with some kind of firmament barrier above, a refractive or reflective layer could in principle bend light paths so that the apparent angular size and position of objects vary depending on the observer's location on the disc. This is exactly the kind of mechanism that could produce the location-dependent parallax that a flat surface cannot explain on its own. The problem shifts from "contrived Sun/Moon behavior" to "what optical properties does the firmament need?" — a spatially varying refractive index, precisely tuned to reproduce what a curved surface gives you geometrically. Graded-index optics exist (fiber optics work this way), but the firmament would need to encode the exact equivalent of spherical geometry in its refractive profile, which raises the question of whether you have just hidden the sphere inside the lens. For eclipse prediction, if such a firmament existed and its optical properties were known, one could compute refracted shadow cones and get correct paths on a flat surface. The code would need a ray-tracing step through the firmament layer instead of a straight-line cone intersection — more complex, but mathematically tractable.
+
 ### What Has Changed Since Bessel
 
 The geometric formulation is roughly 200 years old. What has improved is the quality of the inputs:
