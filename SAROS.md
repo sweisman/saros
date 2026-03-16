@@ -18,7 +18,7 @@ Abraham Zacuto and Regiomontanus produced eclipse almanacs in the 15th century t
 
 The jump from "when" to "where" required two breakthroughs:
 
-- **Isaac Newton's** gravitational theory (late 17th century) provided accurate enough lunar and solar positions.
+- **Isaac Newton's** *Principia Mathematica* (1687) established the gravitational framework, which subsequent work in celestial mechanics (Clairaut, Euler, Mayer) developed into lunar and solar tables accurate enough for prediction.
 - **Edmond Halley** (1715) produced the first map of a predicted solar eclipse path across England, using Newton's lunar theory. This was a genuinely new kind of prediction — not just the time, but the ground track.
 - **Friedrich Bessel** (1820s–1830s) formalized the method still used today. The "Besselian elements" describe the Moon's shadow axis relative to a fundamental plane through Earth's center.
 
