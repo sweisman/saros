@@ -249,13 +249,13 @@ sub do_calculate {
     my $partial_count = 0;
     for my $nm (@$all) {
         next unless $nm->{eclipse_possible};
-        my $date = sprintf("%d.%d.%d", $nm->{day}, $nm->{month}, $nm->{year});
+        my $date = sprintf("%d-%02d-%02d", $nm->{year}, $nm->{month}, $nm->{day});
         $status_msg = "Checking $date...";
         $mw->update;
         if ($engine->has_central_line($nm)) {
             $eclipse_num++;
             my $color = $PATH_COLORS[($eclipse_num - 1) % scalar @PATH_COLORS];
-            my $label = sprintf "%02d.%02d.%d", $nm->{day}, $nm->{month}, $nm->{year};
+            my $label = sprintf "%d-%02d-%02d", $nm->{year}, $nm->{month}, $nm->{day};
             push @eclipse_candidates, {
                 nm           => $nm,
                 number       => $eclipse_num,

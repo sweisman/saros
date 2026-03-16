@@ -111,8 +111,8 @@ printf "Found %d eclipse candidate(s):\n\n", scalar @$candidates;
 my @all_central_points;
 
 for my $nm (@$candidates) {
-    printf "═══ %02d/%02d/%d  (β = %.4f°) ═══\n",
-        $nm->{day}, $nm->{month}, $nm->{year}, $nm->{beta};
+    printf "═══ %d-%02d-%02d  (β = %.4f°) ═══\n",
+        $nm->{year}, $nm->{month}, $nm->{day}, $nm->{beta};
 
     my $line = $engine->calculate_central_line($nm);
     my @central = grep { $_->{phase} eq 'central' && defined $_->{geo_lon} } @$line;
