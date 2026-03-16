@@ -57,8 +57,32 @@ That said, this code already renders eclipse paths on an azimuthal equidistant m
 The geometric formulation is roughly 200 years old. What has improved is the quality of the inputs:
 
 - **Lunar and solar ephemerides** — from hand-computed perturbation series to JPL's numerically integrated DE series.
-- **ΔT correction** — TT (Terrestrial Time) vs. UT (Universal Time) diverge due to tidal deceleration of Earth's rotation. For historical eclipses, ΔT can be tens of minutes, shifting the central line by hundreds of kilometers.
+- **ΔT correction** — TT (Terrestrial Time) vs. UT (Universal Time) diverge due to tidal deceleration of Earth's rotation. For historical eclipses, ΔT can be tens of minutes, shifting the central line by hundreds of kilometers. See below.
 - **Earth figure** — from a perfect sphere to the WGS84 reference ellipsoid, correcting path positions by up to ~20 km at mid-latitudes.
+
+### ΔT: What It Is, How We Know, and How Far Back It Holds
+
+ΔT is the difference between Terrestrial Time (TT), which ticks uniformly, and Universal Time (UT), which tracks the Earth's actual rotation. The Earth's rotation is gradually slowing due to tidal friction — the Moon's gravity raises ocean tides, and the drag of those tides against the rotating Earth transfers rotational energy to the Moon's orbit. The Moon recedes at ~3.8 cm/year (confirmed by lunar laser ranging), and the day lengthens by roughly 2.3 milliseconds per century.
+
+Those milliseconds accumulate. Over a century, a 2.3 ms/day drift adds up to about 42 seconds of clock offset. Over a millennium, the offset reaches tens of minutes. Over two millennia, it can be hours. This is ΔT.
+
+**How we know it is real:**
+
+- **Post-1955:** Directly measured by comparing atomic clocks (defining TT) against Earth's rotation (defining UT). No ambiguity.
+- **1620–1955:** Well-constrained by telescopic observations of stellar transits, which give Earth's rotational position precisely.
+- **Pre-1620:** Inferred from historical eclipse records. This is where it gets interesting.
+
+If you compute when and where an ancient eclipse should have been visible using modern orbital mechanics but without ΔT correction, the computed path lands in the wrong place. Chinese records of a total solar eclipse in 899 BCE place it at a specific location. With zero ΔT, the computed path misses by thousands of kilometers. Adjust ΔT by the expected amount (~6 hours) and the path matches the historical record.
+
+The same test works across independent civilizations — Babylonian clay tablets, Greek accounts, medieval European chronicles, Arabic astronomical records. Espenak & Meeus's polynomial is a smooth curve fitted to reconcile all of these. The fact that a single smooth curve works across 2,500 years of independent records from China, Babylon, Greece, and the Islamic world is strong evidence that the underlying model (tidal deceleration) is correct.
+
+**Limits of the extrapolation:**
+
+- Before ~700 BCE, there are very few reliable records and the polynomial is extrapolation with growing uncertainty.
+- The reasoning for the pre-telescopic era is somewhat circular — historical eclipse records are used to determine ΔT, and ΔT is then used to validate the records. But the convergence of independent sources mitigates this.
+- For modern eclipses (last century or two), ΔT is small enough (~69 seconds in 2025) that it shifts the eclipse path by only 20–30 km — invisible at map scale. It only matters significantly for eclipses hundreds or thousands of years in the past.
+
+This code always applies ΔT correction using the Espenak & Meeus piecewise polynomial covering -500 CE to 2150 CE.
 
 ## Provenance of This Code
 
