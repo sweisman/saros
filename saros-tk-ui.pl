@@ -52,7 +52,6 @@ my ($from_year, $to_year) = ($current_year, $current_year + 1);
 my @eclipse_candidates;     # { nm => ..., number => N, color => ..., plotted => 0|1, central_line => [...] }
 my $map_photo;              # keep Tk Photo alive for canvas
 my $status_msg = "Enter a year range and click Calculate.";
-my $earth_model = 'wgs84';
 my $show_sun_path = 0;
 
 # Map extent overrides (empty = use defaults)
@@ -126,12 +125,6 @@ $input_f->Button(-text => 'Calculate', -command => \&do_calculate)
 
 $input_f->Frame(-width => 1, -background => '#999999', -relief => 'flat')
     ->pack(-side => 'left', -fill => 'y', -padx => 6, -pady => 6);
-
-$input_f->Optionmenu(
-    -variable => \$earth_model,
-    -options  => [['WGS84' => 'wgs84'], ['Sphere' => 'sphere']],
-    -command  => sub { _rebuild_engine() },
-)->pack(-side => 'left', -padx => 6, -pady => 8);
 
 $input_f->Checkbutton(-text => "Sun path", -variable => \$show_sun_path,
     -command => \&redraw_map)
@@ -214,7 +207,7 @@ MainLoop;
 sub _rebuild_engine {
     $engine = Saros::Engine->new(
         use_delta_t => 1,
-        earth_model => $earth_model,
+        earth_model => 'wgs84',
     );
 }
 
