@@ -58,7 +58,7 @@ my $show_sun_path = 0;
 my %extent = (
     merc_west  => '', merc_east  => '',
     merc_north => '', merc_south => '',
-    az_center_lat => '90', az_center_lon => '180',
+    az_center_lat => '90', az_center_lon => '0',
     az_radius     => '180',
     az_img_x => '62', az_img_y => '402', az_img_w => '1116', az_img_h => '1116',
     merc_img_x => '', merc_img_y => '', merc_img_w => '', merc_img_h => '',
@@ -529,10 +529,8 @@ sub _draw_eclipse_badges {
     my $color = $ec->{color};
 
     # Badge at start of eclipse central line
-    # AE projection: reverse iteration (east-west flip); Mercator: forward
     my @line = @{$ec->{central_line}};
-    my @badge_line = $projection_type eq 'azimuthal_equidistant' ? reverse @line : @line;
-    for my $pt (@badge_line) {
+    for my $pt (@line) {
         next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
         my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
         next unless defined $x && defined $y;
@@ -543,9 +541,7 @@ sub _draw_eclipse_badges {
 
     # Badge at start of sun path
     if ($show_sun_path && $ec->{sun_track}) {
-        my @track = $projection_type eq 'azimuthal_equidistant'
-            ? reverse @{$ec->{sun_track}} : @{$ec->{sun_track}};
-        for my $pt (@track) {
+        for my $pt (@{$ec->{sun_track}}) {
             my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
             next unless defined $x && defined $y;
             next if $x < 0 || $x > $map_img_w || $y < 0 || $y > $map_img_h;
@@ -801,10 +797,7 @@ sub _draw_eclipse_badges_gd {
     my $num   = $ec->{number};
 
     # Badge at start of eclipse central line
-    # AE projection: reverse iteration (east-west flip); Mercator: forward
-    my @line = $projection_type eq 'azimuthal_equidistant'
-        ? reverse @{$ec->{central_line}} : @{$ec->{central_line}};
-    for my $pt (@line) {
+    for my $pt (@{$ec->{central_line}}) {
         next unless $pt->{phase} eq 'central' && defined $pt->{geo_lon};
         my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
         next unless defined $x && defined $y;
@@ -815,9 +808,7 @@ sub _draw_eclipse_badges_gd {
 
     # Badge at start of sun path
     if ($show_sun_path && $ec->{sun_track}) {
-        my @track = $projection_type eq 'azimuthal_equidistant'
-            ? reverse @{$ec->{sun_track}} : @{$ec->{sun_track}};
-        for my $pt (@track) {
+        for my $pt (@{$ec->{sun_track}}) {
             my ($x, $y) = $proj->project($pt->{geo_lat}, $pt->{geo_lon});
             next unless defined $x && defined $y;
             next if $x < 0 || $x > $img_w || $y < 0 || $y > $img_h;

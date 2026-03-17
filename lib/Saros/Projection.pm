@@ -185,7 +185,7 @@ sub _azimuthal_equidistant {
     my $cx = $s->{image_x} + $s->{image_w} / 2;
     my $cy = $s->{image_y} + $s->{image_h} / 2;
 
-    return ($cx - $kp_x * $scale, $cy - $kp_y * $scale);
+    return ($cx + $kp_x * $scale, $cy - $kp_y * $scale);
 }
 
 sub _azimuthal_equidistant_inv {
@@ -199,7 +199,7 @@ sub _azimuthal_equidistant_inv {
     my $cx = $s->{image_x} + $s->{image_w} / 2;
     my $cy = $s->{image_y} + $s->{image_h} / 2;
 
-    my $kp_x = ($cx - $x) / $scale;
+    my $kp_x = ($x - $cx) / $scale;
     my $kp_y = ($cy - $y) / $scale;
 
     my $rho = sqrt($kp_x * $kp_x + $kp_y * $kp_y);
