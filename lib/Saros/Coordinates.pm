@@ -27,7 +27,6 @@ sub obliquity {
 # Returns ($lambda_deg, $beta_deg, $cartesian_equatorial_xyz_km)
 sub sun_position {
     my ($t) = @_;
-    my $mS = 149600000;  # mean Sun-Earth distance [km]
 
     # Mean anomaly [rad]
     my $lS = chopdigits(0.9931266 + 99.9973604 * $t) * $PI2;
@@ -46,6 +45,9 @@ sub sun_position {
     # Ecliptic latitude [degrees] — effectively 0 for the Sun
     my $beta = 0;
 
+    # Earth-Sun distance [km] — dominant eccentricity correction (e=0.016708)
+    my $mS = 149597870 * (1 - 0.016708 * cos($lS) - 0.000141 * cos(2 * $lS));
+
     # Convert to equatorial cartesian [km]
     my $xyz = _ecliptic_to_equatorial_cartesian($lambda, $beta, $mS, $t);
 
@@ -58,7 +60,6 @@ sub moon_position {
     my ($t) = @_;
     my $D0 = 0.827361;
     my $D1 = 1236.853086;
-    my $mM = 384400;  # mean Moon-Earth distance [km]
 
     # Mean anomaly of Moon [rad]
     my $lM = chopdigits(0.374897 + 1325.552410 * $t) * $PI2;
@@ -94,6 +95,66 @@ sub moon_position {
 
     # Ecliptic latitude [degrees]
     my $beta = (18520 * sin($F + $dlam * $PI2 + $S) + $N) / 3600.0;
+
+    # Moon-Earth distance [km] — Meeus Ch.47 Table 47.A (Σr, units: 0.001 km)
+    # Eccentricity factor for terms with M (Sun's anomaly) dependence
+    my $E  = 1 - 0.002516 * $t - 0.0000074 * $t * $t;
+    my $E2 = $E * $E;
+    my @dr_terms = (
+        # D   M   M'  F    coeff (0.001 km)
+        [ 0,  0,  1,  0,  -20905355],
+        [ 2,  0, -1,  0,   -3699111],
+        [ 2,  0,  0,  0,   -2955968],
+        [ 0,  0,  2,  0,    -569925],
+        [ 0,  1,  0,  0,      48888],
+        [ 0,  0,  0,  2,      -3149],
+        [ 2,  0, -2,  0,     246158],
+        [ 2, -1, -1,  0,    -152138],
+        [ 2,  0,  1,  0,    -170733],
+        [ 2, -1,  0,  0,    -204586],
+        [ 0,  1, -1,  0,    -129620],
+        [ 1,  0,  0,  0,     108743],
+        [ 0,  1,  1,  0,     104755],
+        [ 2,  0,  0, -2,      10321],
+        [ 0,  0,  1, -2,      79661],
+        [ 4,  0, -1,  0,     -34782],
+        [ 0,  0,  3,  0,     -23210],
+        [ 4,  0, -2,  0,     -21636],
+        [ 2,  1, -1,  0,      24208],
+        [ 2,  1,  0,  0,      30824],
+        [ 1,  0, -1,  0,      -8379],
+        [ 1,  1,  0,  0,     -16675],
+        [ 2, -1,  1,  0,     -12831],
+        [ 2,  0,  2,  0,     -10445],
+        [ 4,  0,  0,  0,     -11650],
+        [ 2,  0, -3,  0,      14403],
+        [ 0,  1, -2,  0,      -7003],
+        [ 2, -1, -2,  0,      10056],
+        [ 1,  0,  1,  0,       6322],
+        [ 2, -2,  0,  0,      -9884],
+        [ 0,  1,  2,  0,       5751],
+        [ 2, -2, -1,  0,      -4950],
+        [ 2,  0,  1, -2,       4130],
+        [ 4, -1, -1,  0,      -3958],
+        [ 3,  0, -1,  0,       3258],
+        [ 2,  1,  1,  0,       2616],
+        [ 4, -1, -2,  0,      -1897],
+        [ 0,  2, -1,  0,      -2117],
+        [ 2,  2, -1,  0,       2354],
+        [ 4,  0,  1,  0,      -1423],
+        [ 0,  0,  4,  0,      -1117],
+        [ 4, -1,  0,  0,      -1571],
+        [ 1,  0, -2,  0,      -1739],
+        [ 0,  0,  2, -2,      -4421],
+        [ 2,  0, -1, -2,       8752],
+    );
+    my $sum_r = 0;
+    for my $term (@dr_terms) {
+        my ($td, $tm, $tmp, $tf, $coeff) = @$term;
+        my $Ef = (abs($tm) == 2) ? $E2 : (abs($tm) == 1) ? $E : 1;
+        $sum_r += $coeff * $Ef * cos($td*$D + $tm*$lS + $tmp*$lM + $tf*$F);
+    }
+    my $mM = 385000.56 + $sum_r / 1000;
 
     # Convert to equatorial cartesian [km]
     my $xyz = _ecliptic_to_equatorial_cartesian($lambda, $beta, $mM, $t);

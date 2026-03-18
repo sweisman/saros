@@ -286,18 +286,18 @@ sub calculate_central_line {
         # (projection of -moon_vector onto shadow direction)
         my $d0 = -($m->[0]*$e[0] + $m->[1]*$e[1] + $m->[2]*$e[2]);
 
-        # Shadow cone radii at distance d0 from Moon along axis
+        # Penumbra radius at d0 (closest approach) — used for partial eclipse test
         my $rH = (($r_M * $dist) / ($r_M + $r_S) + $d0)
                  * tan(asin(($r_M + $r_S) / $dist));
-        my $rK = (($r_M * $dist) / ($r_S - $r_M) - $d0)
-                 * tan(asin(($r_S - $r_M) / $dist));
-        $rK = abs($rK);
+
+        # Umbra tip distance from Moon along shadow axis
+        my $L_tip = ($r_M * $dist) / ($r_S - $r_M);
+        my $tan_half = tan(asin(($r_S - $r_M) / $dist));
 
         # How far the shadow axis is from Earth's surface
         my $p0 = $self->_surface_distance($m, \@e, $d0);
 
         # Determine phase from shadow geometry
-        # p0 > 0 means the shadow axis passes through/below the surface.
         # The ray intersection test is the definitive check for central eclipse
         # (shadow axis actually hits the surface on the sunlit side).
         # p0 > -rH means Earth is within the penumbra cone (partial eclipse).
@@ -311,9 +311,17 @@ sub calculate_central_line {
             next;  # no eclipse
         }
 
-        my ($geo_lon, $geo_lat);
+        my ($geo_lon, $geo_lat, $rK);
 
         if ($phase eq 'central') {
+            # rK at the actual surface intersection — positive means umbra
+            # reaches Earth (total), negative means only antumbra (annular).
+            # Using t_hit (not d0) corrects for the ~30 km systematic error
+            # from using the closest-approach point instead of the surface point.
+            my $t_hit = sqrt(($hit->[0] - $m->[0])**2
+                           + ($hit->[1] - $m->[1])**2
+                           + ($hit->[2] - $m->[2])**2);
+            $rK = ($L_tip - $t_hit) * $tan_half;
             # Convert cartesian hit point to geographic coordinates
             #
             # For the ellipsoid, geographic (geodetic) latitude is NOT
@@ -369,6 +377,7 @@ sub calculate_central_line {
             hour     => $hour,
             h_m_time => $h_m,
             phase    => $phase,
+            type     => ($phase eq 'central') ? ($rK >= 0 ? 'total' : 'annular') : undef,
             geo_lon  => $geo_lon,
             geo_lat  => $geo_lat,
         };

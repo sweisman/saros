@@ -18,7 +18,7 @@ The project is a refactored and extended version of a 2003 high school mathemati
 
 ### Coordinate Systems
 
-All computation happens in **Earth-centered equatorial Cartesian coordinates** (x, y, z in kilometers). The Sun and Moon are positioned using ecliptic orbital elements (mean anomalies, elongations, node distances) computed as trigonometric series in time. These ecliptic coordinates are rotated into the equatorial frame using the obliquity of the ecliptic at the given epoch.
+All computation happens in **Earth-centered equatorial Cartesian coordinates** (x, y, z in kilometers). The Sun and Moon are positioned using ecliptic orbital elements (mean anomalies, elongations, node distances) computed as trigonometric series in time. These ecliptic coordinates are rotated into the equatorial frame using the obliquity of the ecliptic at the given epoch. The Moon's distance is computed using the 45-term Meeus Chapter 47 perturbation table (variation: ±27,000 km, ~7%). The Sun's distance uses the dominant eccentricity correction (variation: ±2.5 million km, ~1.7%). Both are required to determine whether an eclipse is total or annular.
 
 ### Shadow Geometry
 
@@ -223,7 +223,7 @@ perl saros-tk-ui.pl
 The GUI launches maximized in azimuthal equidistant projection (Gleason map) by default and auto-calculates eclipses for the current year and next year on startup. Only eclipses with a central line (total or annular) are listed; partial-only eclipses are filtered out.
 
 - **Top bar** - Year range input, Calculate button, Sun path toggle.
-- **Left panel** - Scrollable checkbox list of central eclipses, each with a numbered color swatch. Check individual eclipses or use All/None buttons to plot paths on the map. Central lines are computed on demand when an eclipse is first checked.
+- **Left panel** - Scrollable checkbox list of central eclipses, each with a numbered color swatch. Total eclipses show only the date; annular and hybrid eclipses append the type (e.g. `2023-10-14 annular`). The type is determined when the eclipse is first checked and the central line computed. Check individual eclipses or use All/None buttons to plot paths on the map.
 - **Map area** - Displays the selected map projection with eclipse paths overlaid. Paths are drawn with black outlines and vivid neon colors that cycle through a 12-color palette. Numbered badges appear at the start of each path, drawn in a final pass so they are never obscured by overlapping paths. The AE map renders at full native resolution with scrollbars; the Mercator map scales to fit the viewport on window resize.
 - **Sun path overlay** - When enabled, shows the subsolar track (where the Sun is directly overhead) during the period of centrality as a dashed line in the same color as the eclipse path.
 - **Status bar** - Current operation feedback.
@@ -252,6 +252,8 @@ The test suite validates module loading, calendar round-trips, ΔT plausibility,
 
 - **Truncated perturbation series.** Positional accuracy is roughly ±2 minutes in time and ±20-50 km in path position. This is adequate for visualization but not for precise local predictions. For sub-kilometer accuracy, use JPL ephemerides (DE440) with Besselian element methods.
 
+- **Marginal hybrid eclipses.** An eclipse where the total/annular transition occurs near the path endpoints may be labelled total rather than hybrid. The brief annular segments at the path tips can fall between the 5-minute time steps, and the truncated angular series introduces enough positional uncertainty to push borderline cases one way or the other.
+
 - **No topographic correction.** The Earth model is a smooth ellipsoid (or sphere). Surface elevation affects contact times for a specific observer but not the central line position at map scale.
 
 - **ΔT extrapolation.** Beyond 2050, ΔT values are extrapolated and increasingly uncertain. For far-future eclipses the time error grows.
@@ -269,5 +271,7 @@ The original Saros was released under the GNU General Public License v2 by Sebas
 - Espenak, F. & Meeus, J. - *Five Millennium Canon of Solar Eclipses: -1999 to +3000*. NASA/TP-2006-214141.
 - Espenak, F. & Meeus, J. - [Polynomial Expressions for Delta T](https://eclipse.gsfc.nasa.gov/SEhelp/deltatpoly2004.html).
 - Harl, S. - *Saros: Berechnung von Sonnenfinsternissen* (Facharbeit, Adam-Kraft-Gymnasium Schwabach, 2003).
+- Meeus, J. - *Astronomical Algorithms*, 2nd ed. (1998). Chapter 47 (lunar distance perturbation table).
+- [soniakeys/meeus](https://github.com/soniakeys/meeus) - Go implementation of Meeus, used to verify Chapter 47 coefficients.
 - [NASA Five Millennium Eclipse Catalog](https://eclipse.gsfc.nasa.gov/SEcat5/SEcatalog.html) - for validation.
 - [ΔT (timekeeping)](https://en.wikipedia.org/wiki/%CE%94T_(timekeeping)) - Wikipedia overview.

@@ -300,6 +300,20 @@ sub on_checkbox_toggle {
         $mw->update;
         $ec->{central_line} = $engine->calculate_central_line($ec->{nm});
         $ec->{sun_track} = $engine->calculate_subsolar_track($ec->{nm}, $ec->{central_line});
+
+        # Determine eclipse type from central-line points and update label
+        my %types;
+        for my $pt (@{$ec->{central_line}}) {
+            $types{$pt->{type}}++ if $pt->{phase} eq 'central' && defined $pt->{type};
+        }
+        my $eclipse_type = (keys %types > 1)        ? 'hybrid'
+                         : (exists $types{annular}) ? 'annular'
+                         :                            'total';
+        if ($eclipse_type ne 'total') {
+            $ec->{label} .= " $eclipse_type";
+            $ec->{_cb}->configure(
+                -text => sprintf("%2d  %s", $ec->{number}, $ec->{label}));
+        }
     }
     redraw_map();
 }
@@ -868,7 +882,9 @@ sub show_about {
             "  - Modular architecture\n" .
             "  - \x{0394}T correction (Espenak & Meeus)\n" .
             "  - WGS84 ellipsoidal Earth model\n" .
-            "  - Azimuthal equidistant projection\n\n" .
+            "  - Azimuthal equidistant projection\n" .
+            "  - Variable lunar/solar distance (Meeus Ch.47)\n" .
+            "  - Total/annular/hybrid eclipse classification\n\n" .
             "Licensed under the GNU General Public License v3.",
     )->pack;
     $tl->Button(-text => 'Close', -command => sub { $tl->destroy })->pack(-pady => 10);
