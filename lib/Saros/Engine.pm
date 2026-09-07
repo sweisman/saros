@@ -164,7 +164,10 @@ sub _new_moons_one_year {
     my ($self, $calc_year) = @_;
     my @results;
 
-    for my $i (0 .. 13) {
+    # The start index lands ~2 lunations before the year (D0 offset), so
+    # 15 lunations are needed to reach a Dec 30-31 new moon; the year
+    # filter below drops the extras.
+    for my $i (0 .. 14) {
         my $tNM = (int($D1 * ($calc_year - 2000) / 100) + $i - $D0) / $D1;
         my $beta;
 
@@ -226,12 +229,20 @@ sub _new_moons_one_year {
     return \@results;
 }
 
+# Convert TT (centuries since J2000) to UT by subtracting ΔT, if enabled
+sub _ut_from_tt {
+    my ($self, $t) = @_;
+    return $t unless $self->{use_delta_t};
+    return $t - Saros::DeltaT::delta_t_centuries(2000 + $t * 100);
+}
+
 # ── Central Line Calculator ──────────────────────────────
 
 # Calculate the central line for an eclipse
 # Args: $nm_data - hashref from find_new_moons (needs tNM field)
 # Returns arrayref of hashrefs:
-#   { day, month, year, h_m_time, phase, geo_lon, geo_lat }
+#   { day, month, year, h_m_time, phase, geo_lon, geo_lat, type }
+#   type is "total" or "annular" for central points, undef otherwise
 sub calculate_central_line {
     my ($self, $nm_data) = @_;
     my $tNM = $nm_data->{tNM};
@@ -311,6 +322,8 @@ sub calculate_central_line {
             next;  # no eclipse
         }
 
+        # ΔT: $t is TT; Earth rotation and clock display use UT = TT - ΔT
+        my $t_display = $self->_ut_from_tt($t);
         my ($geo_lon, $geo_lat, $rK);
 
         if ($phase eq 'central') {
@@ -356,16 +369,11 @@ sub calculate_central_line {
             }
 
             ($geo_lon, $geo_lat) = equatorial_to_geographic(
-                $alpha, $lat_geodetic, $t
+                $alpha, $lat_geodetic, $t_display
             );
         }
 
-        # Convert time to calendar (apply ΔT for UT display)
-        my $t_display = $t;
-        if ($self->{use_delta_t}) {
-            my $approx_year = 2000 + $t * 100;
-            $t_display = $t - Saros::DeltaT::delta_t_centuries($approx_year);
-        }
+        # Convert time to calendar
         my $JD = 36525 * $t_display + 2451545;
         my ($day, $month, $year, $hour) = jd_to_date($JD);
         my (undef, $h_m) = jd_to_ut_hours($JD);
@@ -384,6 +392,21 @@ sub calculate_central_line {
     }
 
     return \@results;
+}
+
+# Classify an eclipse from its central-line points.
+# Args: $central_line (arrayref from calculate_central_line)
+# Returns "total", "annular", "hybrid", or undef if there are no central points
+sub eclipse_type {
+    my ($self, $central_line) = @_;
+    my %types;
+    for my $pt (@$central_line) {
+        $types{$pt->{type}}++ if $pt->{phase} eq q{central} && defined $pt->{type};
+    }
+    return undef unless %types;
+    return q{hybrid}  if keys %types > 1;
+    return q{annular} if exists $types{annular};
+    return q{total};
 }
 
 # Quick check: does this eclipse have any central line points?
@@ -467,7 +490,7 @@ sub calculate_subsolar_track {
         my $alpha = atan2($sy, $sx);
         my $r_xy = sqrt($sx*$sx + $sy*$sy);
         my $delta = atan2($sz, $r_xy);
-        my ($geo_lon, $geo_lat) = equatorial_to_geographic($alpha, $delta, $t);
+        my ($geo_lon, $geo_lat) = equatorial_to_geographic($alpha, $delta, $self->_ut_from_tt($t));
         push @results, { geo_lon => $geo_lon, geo_lat => $geo_lat };
     }
 

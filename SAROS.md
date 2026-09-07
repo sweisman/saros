@@ -38,9 +38,9 @@ The cone geometry is scale-invariant — what matters is the *ratios* between th
 
 This is essentially what Bessel realized. The "Besselian elements" abstract away the absolute distances and work with the shadow geometry projected onto a fundamental plane. The absolute km values are just one way to set up the ratios.
 
-This code computes the shadow cone in 3D Cartesian coordinates using physical distances in kilometers — Sun at 149,600,000 km, Moon at 384,400 km, with radii of 696,000 km, 1,738 km, and 6,378 km respectively. The shadow axis is traced as a ray in km-space and intersected with the Earth ellipsoid. But the results are determined entirely by the proportions, not the scale.
+This code computes the shadow cone in 3D Cartesian coordinates using physical distances in kilometers — mean Sun distance ~149,600,000 km, mean Moon distance ~385,000 km (both computed per time step, see below), with radii of 696,000 km, 1,738 km, and 6,378 km respectively. The shadow axis is traced as a ray in km-space and intersected with the Earth ellipsoid. But the results are determined entirely by the proportions, not the scale.
 
-The ratio of Moon radius to Moon distance determines the Moon's angular size, which varies by ~6% over an orbit. That ratio is what determines whether the umbral cone closes before or after it reaches the Earth's surface — total vs. annular. The code now computes the Moon's actual distance at each time step using the Meeus Chapter 47 perturbation table (45 terms, sourced from the soniakeys/meeus implementation), and the Sun's distance using an eccentricity correction. The sign of the resulting umbra radius at the surface intersection determines eclipse type, which is displayed in the eclipse list.
+The ratio of Moon radius to Moon distance determines the Moon's angular size, which varies by ~7% (±27,000 km) over an orbit. That ratio is what determines whether the umbral cone closes before or after it reaches the Earth's surface — total vs. annular. The code now computes the Moon's actual distance at each time step using the Meeus Chapter 47 perturbation table (45 terms, sourced from the soniakeys/meeus implementation), and the Sun's distance using an eccentricity correction. The sign of the resulting umbra radius at the surface intersection determines eclipse type, which is displayed in the eclipse list.
 
 ### A Note on Flat Earth
 
@@ -105,7 +105,7 @@ The current code uses a small custom perturbation series from Harl's 2003 paper 
 
 ### Variable Lunar Distance
 
-Implemented. The Moon's distance now uses the Meeus Chapter 47 perturbation table (45 terms, base distance 385,000.56 km), giving ~6% variation over an orbit. The Sun's distance uses the dominant eccentricity correction (~1.7% variation). Together these determine whether the umbral cone reaches Earth's surface — and thus whether an eclipse is total or annular — which is now displayed in the eclipse list. The eclipse type is determined per path point by comparing the umbra tip distance to the actual shadow axis intersection with Earth's surface.
+Implemented. The Moon's distance now uses the Meeus Chapter 47 perturbation table (45 terms, base distance 385,000.56 km), giving ~7% (±27,000 km) variation over an orbit. The Sun's distance uses the dominant eccentricity correction (~1.7% variation). Together these determine whether the umbral cone reaches Earth's surface — and thus whether an eclipse is total or annular — which is now displayed in the eclipse list. The eclipse type is determined per path point by comparing the umbra tip distance to the actual shadow axis intersection with Earth's surface.
 
 Marginal hybrid eclipses (where the annular-to-total transition occurs near the path endpoints) may be classified as total rather than hybrid, because the brief annular segments at the path tips can fall between the 5-minute time steps. This is a known limitation of the current time resolution combined with the truncated angular perturbation series.
 

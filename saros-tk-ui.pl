@@ -54,8 +54,8 @@ my $map_photo;              # keep Tk Photo alive for canvas
 my $status_msg = "Enter a year range and click Calculate.";
 my $show_sun_path = 0;
 
-# Map extent overrides (empty = use defaults)
-my %extent = (
+# Map extent defaults (empty = derive from image / full range)
+my %DEFAULT_EXTENT = (
     merc_west  => '', merc_east  => '',
     merc_north => '', merc_south => '',
     az_center_lat => '90', az_center_lon => '0',
@@ -63,6 +63,7 @@ my %extent = (
     az_img_x => '62', az_img_y => '402', az_img_w => '1116', az_img_h => '1116',
     merc_img_x => '', merc_img_y => '', merc_img_w => '', merc_img_h => '',
 );
+my %extent = %DEFAULT_EXTENT;
 
 # ── Main Window ───────────────────────────────────────────
 
@@ -295,35 +296,35 @@ sub do_calculate {
 
 sub on_checkbox_toggle {
     my ($ec) = @_;
+    _ensure_central_line($ec);
+    redraw_map();
+}
+
+# Compute (once) the central line, sun track, and type for a plotted eclipse
+sub _ensure_central_line {
+    my ($ec) = @_;
     if ($ec->{plotted} && !$ec->{central_line}) {
         $status_msg = "Computing central line for #$ec->{number} $ec->{label}...";
         $mw->update;
         $ec->{central_line} = $engine->calculate_central_line($ec->{nm});
         $ec->{sun_track} = $engine->calculate_subsolar_track($ec->{nm}, $ec->{central_line});
 
-        # Determine eclipse type from central-line points and update label
-        my %types;
-        for my $pt (@{$ec->{central_line}}) {
-            $types{$pt->{type}}++ if $pt->{phase} eq 'central' && defined $pt->{type};
-        }
-        my $eclipse_type = (keys %types > 1)        ? 'hybrid'
-                         : (exists $types{annular}) ? 'annular'
-                         :                            'total';
-        if ($eclipse_type ne 'total') {
-            $ec->{label} .= " $eclipse_type";
+        # Classify and show non-total types beside the date
+        $ec->{type} = $engine->eclipse_type($ec->{central_line});
+        if (defined $ec->{type} && $ec->{type} ne q{total}) {
             $ec->{_cb}->configure(
-                -text => sprintf("%2d  %s", $ec->{number}, $ec->{label}));
+                -text => sprintf("%2d  %s %s", $ec->{number}, $ec->{label}, $ec->{type}));
         }
     }
-    redraw_map();
 }
 
 sub select_all_eclipses {
     for my $ec (@eclipse_candidates) {
         $ec->{plotted} = 1;
         $ec->{_cb}->select if $ec->{_cb};
-        on_checkbox_toggle($ec);
+        _ensure_central_line($ec);
     }
+    redraw_map();
 }
 
 sub deselect_all_eclipses {
@@ -351,6 +352,7 @@ sub _load_map_image {
     $map_display_photo = undef;
     $map_photo->delete if $map_photo;
     $map_photo = undef;
+    ($native_img_w, $native_img_h) = (0, 0);
 
     if ($HAS_JPEG && defined($map_file) && -e $map_file) {
         eval {
@@ -638,14 +640,14 @@ sub edit_extent {
 
     my $arf = $nb->Labelframe(-text => 'AE Image Region (pixels, blank = full image)', -padx => 8, -pady => 5)
         ->pack(-fill => 'x', -pady => 5);
-    _extent_row($arf, 'Left (x):',   \$extent{az_img_x}, '114');
-    _extent_row($arf, 'Top (y):',    \$extent{az_img_y}, '276');
-    _extent_row($arf, 'Width:',      \$extent{az_img_w}, '528');
-    _extent_row($arf, 'Height:',     \$extent{az_img_h}, '528');
+    _extent_row($arf, 'Left (x):',   \$extent{az_img_x}, $DEFAULT_EXTENT{az_img_x});
+    _extent_row($arf, 'Top (y):',    \$extent{az_img_y}, $DEFAULT_EXTENT{az_img_y});
+    _extent_row($arf, 'Width:',      \$extent{az_img_w}, $DEFAULT_EXTENT{az_img_w});
+    _extent_row($arf, 'Height:',     \$extent{az_img_h}, $DEFAULT_EXTENT{az_img_h});
 
     my $bf = $nb->Frame->pack(-fill => 'x', -pady => 8);
     $bf->Button(-text => 'Reset Defaults', -command => sub {
-        $extent{$_} = '' for keys %extent;
+        $extent{$_} = $DEFAULT_EXTENT{$_} for keys %extent;
     })->pack(-side => 'left', -padx => 5);
     $bf->Button(-text => 'Apply & Redraw', -command => sub {
         redraw_map();
@@ -736,7 +738,7 @@ sub _hex_to_rgb {
 sub _draw_eclipse_path_gd {
     my ($img, $img_w, $img_h, $proj, $ec) = @_;
     my @rgb   = _hex_to_rgb($ec->{color});
-    my $color = $img->colorAllocate(@rgb);
+    my $color = $img->colorResolve(@rgb);
     my $white = $img->colorResolve(255, 255, 255);
     my $num   = $ec->{number};
 
@@ -852,13 +854,14 @@ sub save_eclipse_list {
     };
 
     printf $fh "Saros %s - Eclipse List (%s to %s)\n\n", $VERSION, $from_year, $to_year;
-    printf $fh "%4s  %-12s  %s\n", '#', 'Date', 'Plotted';
-    printf $fh "%s\n", '-' x 28;
+    printf $fh "%4s  %-12s  %-8s  %s\n", q{#}, q{Date}, q{Type}, q{Plotted};
+    printf $fh "%s\n", q{-} x 38;
 
     for my $ec (@eclipse_candidates) {
-        printf $fh "%4d  %-12s  %s\n",
+        printf $fh "%4d  %-12s  %-8s  %s\n",
             $ec->{number}, $ec->{label},
-            $ec->{plotted} ? '*' : '';
+            $ec->{type} // q{},
+            $ec->{plotted} ? q{*} : q{};
     }
 
     close $fh;

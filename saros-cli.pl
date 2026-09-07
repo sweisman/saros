@@ -118,6 +118,7 @@ for my $nm (@$candidates) {
     my @central = grep { $_->{phase} eq 'central' && defined $_->{geo_lon} } @$line;
 
     if (@central) {
+        printf "  Type: %s\n", $engine->eclipse_type($line);
         printf "  %-8s  %10s  %10s\n", 'UT', 'Lon', 'Lat';
         printf "  %-8s  %10s  %10s\n", '--------', '----------', '----------';
         for my $pt (@central) {
@@ -223,7 +224,7 @@ sub write_map_image {
     }
 
     # Plot points
-    my $blue = $img->colorAllocate(0, 170, 255);
+    my $blue = $img->colorResolve(0, 170, 255);
     my $plotted = 0;
 
     for my $pt (@$points) {

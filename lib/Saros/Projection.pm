@@ -2,7 +2,7 @@ package Saros::Projection;
 
 use strict;
 use warnings;
-use Math::Trig qw(acos asin deg2rad rad2deg pi tan);
+use Math::Trig qw(acos asin atan deg2rad rad2deg pi tan);
 use POSIX qw(floor);
 
 # Constructor
