@@ -5,11 +5,9 @@ use warnings;
 use Math::Trig qw(asin atan tan pi);
 use Saros::Calendar qw(jd_to_date jd_to_ut_hours chopdigits);
 use Saros::Coordinates qw(sun_position moon_position equatorial_to_geographic);
-use Saros::DeltaT qw(delta_t);
+use Saros::DeltaT ();
 
 my $PI2     = 2 * pi;
-my $PIHALF  = pi / 2;
-my $PI3HALF = 3 * pi / 2;
 my $D1      = 1236.853086;
 my $D0      = 0.827361;
 
@@ -103,15 +101,6 @@ sub _ray_earth_intersect {
         $oy + $t * $dy,
         $oz + $t * $dz,
     ];
-}
-
-# Check if a point is inside the ellipsoid
-# Used for penumbra/umbra radius calculations
-sub _point_inside_earth {
-    my ($self, $point) = @_;
-    my ($a, $b) = $self->_earth_axes;
-    my ($x, $y, $z) = @$point;
-    return ($x*$x + $y*$y) / ($a*$a) + ($z*$z) / ($b*$b) <= 1.0;
 }
 
 # Distance from a point to the ellipsoid surface along a given direction
@@ -241,7 +230,8 @@ sub _ut_from_tt {
 # Calculate the central line for an eclipse
 # Args: $nm_data - hashref from find_new_moons (needs tNM field)
 # Returns arrayref of hashrefs:
-#   { day, month, year, h_m_time, phase, geo_lon, geo_lat, type }
+#   { t, day, month, year, hour, h_m_time, phase, geo_lon, geo_lat, type }
+#   t is the step time in TT (Julian centuries since J2000)
 #   type is "total" or "annular" for central points, undef otherwise
 sub calculate_central_line {
     my ($self, $nm_data) = @_;
@@ -379,6 +369,7 @@ sub calculate_central_line {
         my (undef, $h_m) = jd_to_ut_hours($JD);
 
         push @results, {
+            t        => $t,
             day      => $day,
             month    => $month,
             year     => $year,
@@ -441,39 +432,14 @@ sub has_central_line {
 # Returns arrayref of { geo_lon, geo_lat } hashrefs.
 sub calculate_subsolar_track {
     my ($self, $nm_data, $central_line) = @_;
-    my $tNM = $nm_data->{tNM};
     my @results;
 
-    # Determine time span from central line points
+    # Time span comes straight from the central-line points (TT)
     my @central = grep { $_->{phase} eq 'central' } @$central_line;
     return \@results unless @central;
-
-    # Find first and last central point indices to get time range
-    my $qday = 0.25 / 36525;
+    my $start = $central[0]{t};
+    my $end   = $central[-1]{t};
     my $dt = 5 / (60 * 24 * 36525);  # 5 min steps
-    my $n_steps = int(2 * $qday / $dt);
-
-    # Count which steps are central (matching the central line loop)
-    my ($first_step, $last_step);
-    my $step = 0;
-    for (my $t = $tNM - $qday; $t <= $tNM + $qday; $t += $dt) {
-        my (undef, undef, $sun_xyz)  = sun_position($t);
-        my (undef, undef, $moon_xyz) = moon_position($t);
-        my $m = $moon_xyz;
-        my @d = ($m->[0] - $sun_xyz->[0], $m->[1] - $sun_xyz->[1], $m->[2] - $sun_xyz->[2]);
-        my $dist = sqrt($d[0]**2 + $d[1]**2 + $d[2]**2);
-        my @e = map { $_ / $dist } @d;
-        if ($self->_ray_earth_intersect($m, \@e)) {
-            $first_step //= $step;
-            $last_step = $step;
-        }
-        $step++;
-    }
-    return \@results unless defined $first_step;
-
-    # Compute subsolar track for that time range
-    my $start = $tNM - $qday + $first_step * $dt;
-    my $end   = $tNM - $qday + $last_step * $dt;
 
     # Use finer steps for short-duration eclipses (target at least 30 points)
     my $duration = $end - $start;

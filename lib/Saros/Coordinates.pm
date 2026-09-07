@@ -7,7 +7,6 @@ use Saros::Calendar qw(chopdigits);
 use Exporter 'import';
 
 our @EXPORT_OK = qw(
-    ecliptic_to_equatorial
     equatorial_to_geographic
     sun_position
     moon_position
@@ -215,12 +214,6 @@ sub equatorial_to_geographic {
     my $geo_lat = rad2deg($delta);
 
     return ($geo_lon, $geo_lat);
-}
-
-# Exported version of ecliptic_to_equatorial for external use
-sub ecliptic_to_equatorial {
-    my ($lambda_deg, $beta_deg, $dist, $t) = @_;
-    return _ecliptic_to_equatorial_cartesian($lambda_deg, $beta_deg, $dist, $t);
 }
 
 1;

@@ -54,22 +54,6 @@ sub new {
     return $self;
 }
 
-# Update pixel dimensions (e.g. after loading an image)
-sub set_dimensions {
-    my ($self, $w, $h) = @_;
-    my $old_w = $self->{width};
-    my $old_h = $self->{height};
-    $self->{width}  = $w;
-    $self->{height} = $h;
-    # Scale image region proportionally if it was full-image
-    if ($self->{image_w} == $old_w && $self->{image_h} == $old_h
-        && $self->{image_x} == 0 && $self->{image_y} == 0) {
-        $self->{image_w} = $w;
-        $self->{image_h} = $h;
-    }
-    return $self;
-}
-
 sub width  { $_[0]->{width}  }
 sub height { $_[0]->{height} }
 

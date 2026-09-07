@@ -172,8 +172,16 @@ my $map_canvas = $map_f->Scrolled('Canvas',
 )->pack(-expand => 1, -fill => 'both');
 my $map_canvas_inner = $map_canvas->Subwidget('scrolled');
 
-# Rescale map when canvas resizes
-$map_canvas_inner->bind('<Configure>' => sub { redraw_map() });
+# Rescale map when the viewport size changes; debounce so a drag-resize
+# produces one redraw instead of a storm
+my ($last_vp_w, $last_vp_h, $resize_after) = (0, 0, undef);
+$map_canvas_inner->bind('<Configure>' => sub {
+    my ($w, $h) = ($map_canvas_inner->width, $map_canvas_inner->height);
+    return if $w == $last_vp_w && $h == $last_vp_h;
+    ($last_vp_w, $last_vp_h) = ($w, $h);
+    $resize_after->cancel if $resize_after;
+    $resize_after = $mw->after(150, sub { $resize_after = undef; redraw_map() });
+});
 
 # -- Row 2: Status bar
 my $status_f = $mw->Frame(-borderwidth => 0);
@@ -204,13 +212,6 @@ MainLoop;
 # ══════════════════════════════════════════════════════════
 # Callbacks
 # ══════════════════════════════════════════════════════════
-
-sub _rebuild_engine {
-    $engine = Saros::Engine->new(
-        use_delta_t => 1,
-        earth_model => 'wgs84',
-    );
-}
 
 sub do_calculate {
     unless (defined $from_year && defined $to_year
@@ -340,29 +341,31 @@ sub deselect_all_eclipses {
 my ($map_img_w, $map_img_h) = (540, 420);    # display dimensions (scaled to viewport)
 my ($native_img_w, $native_img_h) = (540, 420);  # native image dimensions (for saving)
 my $map_display_photo;  # scaled Photo for canvas display
+my %native_photo_cache;  # map file => decoded native Photo (decoded once)
+my %display_photo_cache; # "file/subsample" => subsampled display Photo
+my %native_dims_cache;   # map file => [w, h]
 
 sub _load_map_image {
     my $map_file = ($projection_type eq 'azimuthal_equidistant' && $AZMAP ne '')
         ? $AZMAP : $WORLDMAP;
 
-    # Clean up old photos (avoid double-delete when display == native)
-    if ($map_display_photo && $map_display_photo != $map_photo) {
-        $map_display_photo->delete;
-    }
-    $map_display_photo = undef;
-    $map_photo->delete if $map_photo;
     $map_photo = undef;
+    $map_display_photo = undef;
     ($native_img_w, $native_img_h) = (0, 0);
 
     if ($HAS_JPEG && defined($map_file) && -e $map_file) {
-        eval {
-            $map_photo = $mw->Photo(-format => 'jpeg', -file => $map_file);
-            $native_img_w = $map_photo->width;
-            $native_img_h = $map_photo->height;
-        };
-        if ($@ || !$native_img_w || !$native_img_h) {
-            $map_photo = undef;
+        if (!exists $native_photo_cache{$map_file}) {
+            my $photo;
+            eval { $photo = $mw->Photo(-format => 'jpeg', -file => $map_file) };
+            if ($@ || !$photo || !$photo->width || !$photo->height) {
+                $photo = undef;
+            }
+            # Cache failures too (undef) so a bad file is not retried every redraw
+            $native_photo_cache{$map_file} = $photo;
+            $native_dims_cache{$map_file}  = $photo ? [$photo->width, $photo->height] : undef;
         }
+        $map_photo = $native_photo_cache{$map_file};
+        ($native_img_w, $native_img_h) = @{ $native_dims_cache{$map_file} } if $map_photo;
     }
 
     # Defaults when no image
@@ -373,7 +376,7 @@ sub _load_map_image {
     # Mercator: scale to fit viewport
     my $scale = 1.0;
     if ($projection_type ne 'azimuthal_equidistant') {
-        $mw->update;  # ensure geometry is current
+        $mw->update;  # ensure geometry is current (startup draw)
         my $vp_w = $map_canvas_inner->width  || 500;
         my $vp_h = $map_canvas_inner->height || 400;
         my $scale_x = $vp_w / $native_img_w;
@@ -385,11 +388,16 @@ sub _load_map_image {
     $map_img_w = int($native_img_w * $scale);
     $map_img_h = int($native_img_h * $scale);
 
-    # Create scaled display photo if needed
+    # Subsampled display photo, built once per (file, factor)
     if ($map_photo && $scale < 1.0) {
-        $map_display_photo = $mw->Photo;
-        $map_display_photo->copy($map_photo,
-            -subsample => int(1 / $scale + 0.5), int(1 / $scale + 0.5));
+        my $factor = int(1 / $scale + 0.5);
+        my $key = "$map_file/$factor";
+        if (!$display_photo_cache{$key}) {
+            my $dp = $mw->Photo;
+            $dp->copy($map_photo, -subsample => $factor, $factor);
+            $display_photo_cache{$key} = $dp;
+        }
+        $map_display_photo = $display_photo_cache{$key};
         $map_img_w = $map_display_photo->width;
         $map_img_h = $map_display_photo->height;
     } elsif ($map_photo) {
